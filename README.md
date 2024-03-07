@@ -2,6 +2,7 @@
 Raspberry Pi Pico W project to turn on a PC over the internet
 
 Required Parts:
+
 Raspberry Pi Pico WH or Pico W with soldered header
 
 Jumper wire splitter ([what I used](https://www.amazon.com/gp/product/B0CNYJZ8D7/))
