@@ -4,14 +4,10 @@ Raspberry Pi Pico W project to turn on a PC over the internet
 Credit to [Lutz](https://www.youtube.com/watch?v=znwLqv2otRQ)
 
 Required Parts:
-
-Raspberry Pi Pico WH or Pico W with soldered header
-
-Jumper wire splitter ([what I used](https://www.amazon.com/gp/product/B0CNYJZ8D7/))
-
-3.3V Relay ([what I used](https://www.amazon.com/gp/product/B08W3XDNGK/?th=1))
-
-Various jumper wires
+- Raspberry Pi Pico WH or Pico W with soldered header
+- Jumper wire splitter ([what I used](https://www.amazon.com/gp/product/B0CNYJZ8D7/))
+- 3.3V Relay ([what I used](https://www.amazon.com/gp/product/B08W3XDNGK/?th=1))
+- Various jumper wires
 
 Setup:
 1. Refer to [Raspberry Pi's documentation](https://projects.raspberrypi.org/en/projects/get-started-pico-w/1) for initial setup of Pico W.
@@ -24,5 +20,5 @@ Setup:
 8. Power the board to start the program.
 9. Figure out the LAN address assigned to the board. You could look at your network gateway's UI or view the program's output over a MicroPython REPL connection (e.g. MicroPico)
 10. Enter the LAN address into the [accompanying Android app](https://github.com/wyattgardner/pc_switch_app).
-11. To use your network's WAN address to send the packet, you must forward the port you're using (7776 by default) to the Pico W.
-12. You can now use the app to turn on your PC.
+    * To use your network's WAN address to send the packet, you must forward the port you're using (7776 by default) to the Pico W.
+11. You can now use the app to turn on your PC.
