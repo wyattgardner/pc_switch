@@ -7,7 +7,7 @@ Required Parts:
 - Raspberry Pi Pico WH or Pico W with soldered header
 - Jumper wire splitter ([what I used](https://www.amazon.com/gp/product/B0CNYJZ8D7/))
 - 3.3V Relay ([what I used](https://www.amazon.com/gp/product/B08W3XDNGK/?th=1))
-- Various jumper wires
+- At least 5 Male to Female jumper wires (need more to run wire outside of PC case)
 
 Setup:
 1. Refer to [Raspberry Pi's documentation](https://projects.raspberrypi.org/en/projects/get-started-pico-w/1) for initial setup of MicroPython on the Pico W.
