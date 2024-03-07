@@ -21,6 +21,5 @@ Setup:
 7. Power the board to start the program.
 8. Figure out the LAN address assigned to the board. You could look at your network gateway's UI or view the program's output over a MicroPython REPL connection (e.g. MicroPico)
 9. Enter the LAN address into the [accompanying Android app](https://github.com/wyattgardner/pc_switch_app).
-
-9b. To use your network's WAN address to send the packet, you must forward the port you're using (7776 by default) to the Pico W.
+10. To use your network's WAN address to send the packet, you must forward the port you're using (7776 by default) to the Pico W.
 11. You can now use the app to turn on your PC.
