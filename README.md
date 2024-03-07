@@ -1,6 +1,8 @@
 # pc_switch
 Raspberry Pi Pico W project to turn on a PC over the internet
 
+Credit to [Lutz](https://www.youtube.com/watch?v=znwLqv2otRQ)
+
 Required Parts:
 
 Raspberry Pi Pico WH or Pico W with soldered header
