@@ -87,7 +87,7 @@ try:
         command = ujson.loads(data)
         logger('Command received: ', command)
 
-        # Turn the GPIO pin on or off based on the received command
+        # Excecute command
         if command['gpio'] == 'on':
             logger('Turning PC on...\n')
 
