@@ -4,7 +4,7 @@ Raspberry Pi Pico W project to turn on a PC over the internet
 Credit to [Lutz](https://www.youtube.com/watch?v=znwLqv2otRQ)
 
 Required Parts:
-- Raspberry Pi Pico WH or Pico W with soldered header
+- Raspberry Pi Pico WH (soldered header) or solder jumper wires to a standard Pico W
 - Jumper wire splitter ([what I used](https://www.amazon.com/gp/product/B0CNYJZ8D7/))
 - 3.3V Relay ([what I used](https://www.amazon.com/gp/product/B08W3XDNGK/?th=1))
 - At least 5 Male to Female jumper wires (need more to run wire outside of PC case)
