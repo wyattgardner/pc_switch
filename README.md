@@ -11,7 +11,7 @@ Credit to [Lutz](https://www.youtube.com/watch?v=znwLqv2otRQ)
 
 # Setup
 1. Refer to [Raspberry Pi's documentation](https://projects.raspberrypi.org/en/projects/get-started-pico-w/1) for initial setup of MicroPython on the Pico W.
-2. Set your network's SSID and password on line 8 of main.py.
+2. Set your network's SSID and password on line 10 of main.py.
 3. Upload main.py to root directory of Pico W ([method recommended by Raspberry Pi](https://projects.raspberrypi.org/en/projects/getting-started-with-the-pico/9), other methods include using BOOTSEL to copy it directly or using the MicroPico extension in VS Code).
 4. Disconnect power button wires from power button pins on your PC's motherboard.
 5. Connect a jumper wire splitter to the pins and reconnect the power button wires to one end of the splitter.
