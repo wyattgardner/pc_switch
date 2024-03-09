@@ -3,13 +3,13 @@ Raspberry Pi Pico W project to turn on a PC over the internet
 
 Credit to [Lutz](https://www.youtube.com/watch?v=znwLqv2otRQ)
 
-Required Parts:
+# Required Parts
 - Raspberry Pi Pico WH (soldered header) or solder jumper wires to a standard Pico W
 - Jumper wire splitter ([what I used](https://www.amazon.com/gp/product/B0CNYJZ8D7/))
 - 3.3V Relay ([what I used](https://www.amazon.com/gp/product/B08W3XDNGK/?th=1))
 - At least 5 Male to Female jumper wires (need more to run wire outside of PC case)
 
-Setup:
+# Setup
 1. Refer to [Raspberry Pi's documentation](https://projects.raspberrypi.org/en/projects/get-started-pico-w/1) for initial setup of MicroPython on the Pico W.
 2. Set your network's SSID and password on line 8 of main.py.
 3. Upload main.py to root directory of Pico W ([method recommended by Raspberry Pi](https://projects.raspberrypi.org/en/projects/getting-started-with-the-pico/9), other methods include using BOOTSEL to copy it directly or using the MicroPico extension in VS Code).
