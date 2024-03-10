@@ -31,10 +31,12 @@ wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 
 if ENABLE_LOGGING:
-        log_file = open('log.txt', 'a')
+    log_file = open('log.txt', 'a')
 
 if ENABLE_SYSTEM_TIME:
     time_is_set = False
+
+socket_opened = False
 
 def logger(*args, **kwargs):
     data = ' '.join(str(arg) for arg in args)
@@ -72,11 +74,22 @@ async def attempt_connection(ssid, password):
 
 async def check_connection(ssid, password):
     while True:
-        if not wlan.isconnected():
-            logger('WiFi connection dropped! Attempting reconnection...')
+        if not ping():
+            logger('WiFi connection dropped or network is offline. Attempting reconnection...')
             await attempt_connection(ssid, password)
-
+        
         await uasyncio.sleep(CHECK_TIME)
+    
+def ping(host='8.8.8.8', port=53, timeout=3):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.close()
+        return True
+    except OSError as e:
+        return False
+
 
 async def blinkLED(led, seconds):
     for i in range(int(seconds * 10)):
@@ -130,6 +143,8 @@ async def main():
         s.setblocking(False)
         s.bind(('0.0.0.0', PORT))
         s.listen(1)
+        global socket_opened
+        socket_opened = True
 
         logger('Waiting for a socket connection...\n')
 
@@ -184,7 +199,8 @@ async def main():
         logger('Ending session and restarting...\n\n')
         if ENABLE_LOGGING:
             log_file.close()
-        s.close()
+        if socket_opened:
+            s.close()
         machine.reset()
 
 uasyncio.run(main())
