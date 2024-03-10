@@ -16,7 +16,7 @@ ENABLE_LOGGING = False
 # Enables setting system time from an NTP server for timestamped logging
 ENABLE_SYSTEM_TIME = False
 # Time zone offset from UTC (e.g. -5 for EST)
-TIME_ZONE = -5
+TIME_ZONE = -4
 # Enables a 2 second rapid blink of the Pico W's onboard LED when receiving command to turn on PC
 ENABLE_BLINKING = False
 # Max time in seconds before restarting attempt to connect to WiFi
@@ -167,7 +167,7 @@ async def main():
                 while data == None:
                     try:
                         data = conn.recv(1024)
-                        if data:
+                        if data != None:
                             data = data.decode()
                             command = ujson.loads(data)
                     except OSError as e:
