@@ -5,30 +5,32 @@ import machine
 import ujson
 import uasyncio
 import ntptime
+from micropython import const
 
 # SSID (name) and password of your WiFi network
-SSID, PASSWORD = 'your SSID', 'your password'
+SSID, PASSWORD = const('your SSID'), const('your password')
 # Port used for socket communication (default 7776)
-PORT = 7776
+PORT = const(7776)
 # Enables logging to log.txt in root directory of Pico W
-# For debugging purposes only, will eventually fill the board's 2 MB flash memory
-ENABLE_LOGGING = False
+# For testing/debugging purposes only, will eventually fill the board's 2 MB flash memory
+ENABLE_LOGGING = const(False)
 # Enables setting system time from an NTP server for timestamped logging
-ENABLE_SYSTEM_TIME = False
+ENABLE_SYSTEM_TIME = const(False)
 # Time zone offset from UTC (e.g. -5 for EST)
-TIME_ZONE = -4
+TIME_ZONE = const(-4)
 # Enables a 2 second rapid blink of the Pico W's onboard LED when receiving command to turn on PC
-ENABLE_BLINKING = False
+ENABLE_BLINKING = const(False)
 # Max time in seconds before restarting attempt to connect to WiFi
-WIFI_TIMEOUT = 10
+WIFI_TIMEOUT = const(10)
 # Time in milliseconds that the relay is activated each time command is received
-RELAY_TIME = 200
+RELAY_TIME = const(200)
 # Asynchronous coroutine will check for WiFi connection drop every CHECK_TIME seconds, set to 0 to disable
-CHECK_TIME = 15
+CHECK_TIME = const(180)
 
 # Initialize WiFi functionality
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
+wlan.config(pm = 0xa11140) # Disable power saving mode
 
 if ENABLE_LOGGING:
     log_file = open('log.txt', 'a')
