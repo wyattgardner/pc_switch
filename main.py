@@ -13,29 +13,29 @@ __SSID, __PASSWORD = const('your SSID'), const('your password')
 __PORT = const(7776)
 # Enables logging to log.txt in root directory of Pico W
 # For testing/debugging purposes only, will eventually fill the board's 2 MB flash memory
-_ENABLE_LOGGING = const(False)
+ENABLE_LOGGING = const(False)
 # Enables setting system time from an NTP server for timestamped logging
-_ENABLE_SYSTEM_TIME = const(False)
+ENABLE_SYSTEM_TIME = const(False)
 # Time zone offset from UTC (e.g. -5 for EST)
-_TIME_ZONE = const(-4)
+TIME_ZONE = const(-4)
 # Enables a 2 second rapid blink of the Pico W's onboard LED when receiving command to turn on PC
-_ENABLE_BLINKING = const(False)
+ENABLE_BLINKING = const(False)
 # Max time in seconds before restarting attempt to connect to WiFi
-_WIFI_TIMEOUT = const(10)
+WIFI_TIMEOUT = const(10)
 # Time in milliseconds that the relay is activated each time command is received
-_RELAY_TIME = const(200)
+RELAY_TIME = const(200)
 # Asynchronous coroutine will check for WiFi connection drop every CHECK_TIME seconds, set to 0 to disable
-_CHECK_TIME = const(180)
+CHECK_TIME = const(180)
 
 # Initialize WiFi functionality
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 wlan.config(pm = 0xa11140) # Disable power saving mode
 
-if _ENABLE_LOGGING:
+if ENABLE_LOGGING:
     log_file = open('log.txt', 'a')
 
-if _ENABLE_SYSTEM_TIME:
+if ENABLE_SYSTEM_TIME:
     time_is_set = False
 
 _socket_opened = False
@@ -43,16 +43,16 @@ _socket_opened = False
 def _logger(*args, **kwargs):
     data = ' '.join(str(arg) for arg in args)
 
-    if _ENABLE_SYSTEM_TIME and time_is_set:
-        data = _to_iso8601(time.localtime(), _TIME_ZONE, 0) + ': ' + data
+    if ENABLE_SYSTEM_TIME and time_is_set:
+        data = _to_iso8601(time.localtime(), TIME_ZONE, 0) + ': ' + data
 
     print(data)
 
-    if _ENABLE_LOGGING:
+    if ENABLE_LOGGING:
         log_file.write(data + '\n')
         log_file.flush()
 
-async def _attempt_connection(ssid, password):
+async def attempt_connection(ssid, password):
     attempting_connection = True
 
     while attempting_connection:
@@ -60,7 +60,7 @@ async def _attempt_connection(ssid, password):
         
         _logger('Waiting for WiFi connection...')
 
-        wifi_timeout = _WIFI_TIMEOUT
+        wifi_timeout = WIFI_TIMEOUT
         while not wlan.isconnected() and wifi_timeout > 0:
             wifi_timeout -= 1
             await uasyncio.sleep(1)
@@ -74,13 +74,13 @@ async def _attempt_connection(ssid, password):
             _logger('Connection failed, reattempting...')
             await uasyncio.sleep(1)
 
-async def _check_connection(ssid, password):
+async def check_connection(ssid, password):
     while True:
         if not _ping():
             _logger('WiFi connection dropped or network is offline. Attempting reconnection...')
-            await _attempt_connection(ssid, password)
+            await attempt_connection(ssid, password)
         
-        await uasyncio.sleep(_CHECK_TIME)
+        await uasyncio.sleep(CHECK_TIME)
     
 def _ping(host='8.8.8.8', port=53, timeout=3):
     try:
@@ -127,12 +127,12 @@ async def main():
     try:
         _logger('Beginning a new session')
 
-        await _attempt_connection(__SSID, __PASSWORD)
+        await attempt_connection(__SSID, __PASSWORD)
 
-        if _CHECK_TIME > 0:
-            uasyncio.create_task(_check_connection(__SSID, __PASSWORD))
+        if CHECK_TIME > 0:
+            uasyncio.create_task(check_connection(__SSID, __PASSWORD))
 
-        if _ENABLE_SYSTEM_TIME:
+        if ENABLE_SYSTEM_TIME:
             ntptime.settime()
             global time_is_set
             time_is_set = True
@@ -184,11 +184,11 @@ async def main():
                         _logger('Command received!')
                         _logger('Turning PC on...\n')
 
-                        if _ENABLE_BLINKING:
+                        if ENABLE_BLINKING:
                             uasyncio.create_task(_blinkLED(led, 2))
 
                         relay.value(1)
-                        time.sleep_ms(_RELAY_TIME)
+                        time.sleep_ms(RELAY_TIME)
                         relay.value(0)
 
                     else:
@@ -199,7 +199,7 @@ async def main():
     except Exception as e:
         _logger('An error occurred: ' + str(e))
         _logger('Ending session and restarting...\n\n')
-        if _ENABLE_LOGGING:
+        if ENABLE_LOGGING:
             log_file.close()
         if _socket_opened:
             s.close()
