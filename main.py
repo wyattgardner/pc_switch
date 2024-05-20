@@ -9,17 +9,22 @@ from micropython import const
 
 # SSID (name) and password of your WiFi network
 __SSID, __PASSWORD = const('your SSID'), const('your password')
-# Port used for socket communication (default 7776)
-__PORT = const(7776)
+# Ports used for socket communication (default 7776)
+__PORT1 = const(7776)
+__PORT2 = const(7775)
+# GPIO Pins used for relays and onboard LED
+RELAY1 = machine.Pin(2, machine.Pin.OUT)
+RELAY2 = machine.Pin(3, machine.Pin.OUT)
+LED = machine.Pin("LED", machine.Pin.OUT)
 # Enables logging to log.txt in root directory of Pico W
 # For testing/debugging purposes only, will eventually fill the board's 2 MB flash memory
 ENABLE_LOGGING = const(False)
 # Enables setting system time from an NTP server for timestamped logging
 ENABLE_SYSTEM_TIME = const(False)
-# Time zone offset from UTC (e.g. -5 for EST)
-TIME_ZONE = const(-4)
 # Enables a 2 second rapid blink of the Pico W's onboard LED when receiving command to turn on PC
 ENABLE_BLINKING = const(False)
+# Time zone offset from UTC (e.g. -5 for EST)
+TIME_ZONE = const(-4)
 # Max time in seconds before restarting attempt to connect to WiFi
 WIFI_TIMEOUT = const(10)
 # Time in milliseconds that the relay is activated each time command is received
@@ -38,7 +43,7 @@ if ENABLE_LOGGING:
 if ENABLE_SYSTEM_TIME:
     time_is_set = False
 
-_socket_opened = False
+sockets_opened = False
 
 def _logger(*args, **kwargs):
     data = ' '.join(str(arg) for arg in args)
@@ -123,6 +128,52 @@ def _to_iso8601(local_time_tuple, tz_offset_hours=0, tz_offset_minutes=0):
     
     return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(year, month, day, hour, minute, second)
 
+async def receive_command(relay, socket):
+    while True:
+        conn, addr, data, command = None, None, None, None
+
+        try:
+            conn, addr = socket.accept()
+        except OSError as e:
+            if e.args[0] == 11: # EAGAIN
+                await uasyncio.sleep_ms(100)
+            else:
+                raise
+        
+        if conn != None:
+            _logger('Connection from', addr)
+
+            # Receive a command from the client
+            while data == None:
+                try:
+                    data = conn.recv(1024)
+                    if data != None:
+                        data = data.decode()
+                        command = ujson.loads(data)
+                except OSError as e:
+                    if e.args[0] == 11: # EAGAIN
+                        await uasyncio.sleep_ms(100)
+                    else:
+                        raise
+
+            # Excecute command to turn on PC
+            if command != None:
+                if command['gpio'] == 'on':
+                    _logger('Command received!')
+                    _logger('Turning PC on...\n')
+
+                    if ENABLE_BLINKING:
+                        uasyncio.create_task(_blinkLED(LED, 2))
+
+                    relay.value(1)
+                    await uasyncio.sleep_ms(RELAY_TIME)
+                    relay.value(0)
+
+                else:
+                    _logger('Error reading data packet\n')
+
+            conn.close()
+
 async def main():
     try:
         _logger('Beginning a new session')
@@ -137,73 +188,36 @@ async def main():
             global time_is_set
             time_is_set = True
             _logger('System time set!')
-        
-        relay = machine.Pin(2, machine.Pin.OUT)
-        led = machine.Pin("LED", machine.Pin.OUT)
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setblocking(False)
-        s.bind(('0.0.0.0', __PORT))
-        s.listen(1)
-        global _socket_opened
-        _socket_opened = True
+        s1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s1.setblocking(False)
+        s1.bind(('0.0.0.0', __PORT1))
+        s1.listen(1)
+        s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s2.setblocking(False)
+        s2.bind(('0.0.0.0', __PORT2))
+        s2.listen(1)
+        global sockets_opened
+        sockets_opened = True
 
         _logger('Waiting for a socket connection...\n')
 
-        # main loop
+        uasyncio.create_task(receive_command(RELAY1, s1))
+        uasyncio.create_task(receive_command(RELAY2, s2))
+
         while True:
-            conn, addr, data, command = None, None, None, None
-
-            try:
-                conn, addr = s.accept()
-            except OSError as e:
-                if e.args[0] == 11: # EAGAIN
-                    await uasyncio.sleep_ms(100)
-                else:
-                    raise
-            
-            if conn != None:
-                _logger('Connection from', addr)
-
-                # Receive a command from the client
-                while data == None:
-                    try:
-                        data = conn.recv(1024)
-                        if data != None:
-                            data = data.decode()
-                            command = ujson.loads(data)
-                    except OSError as e:
-                        if e.args[0] == 11: # EAGAIN
-                            await uasyncio.sleep_ms(100)
-                        else:
-                            raise
-
-                # Excecute command to turn on PC
-                if command != None:
-                    if command['gpio'] == 'on':
-                        _logger('Command received!')
-                        _logger('Turning PC on...\n')
-
-                        if ENABLE_BLINKING:
-                            uasyncio.create_task(_blinkLED(led, 2))
-
-                        relay.value(1)
-                        time.sleep_ms(RELAY_TIME)
-                        relay.value(0)
-
-                    else:
-                        _logger('Error reading data packet\n')
-
-                conn.close()
+            await uasyncio.sleep(1)
 
     except Exception as e:
         _logger('An error occurred: ' + str(e))
         _logger('Ending session and restarting...\n\n')
         if ENABLE_LOGGING:
             log_file.close()
-        if _socket_opened:
-            s.close()
+        if sockets_opened:
+            s1.close()
+            s2.close()
         machine.reset()
 
 if __name__ == "__main__":
     uasyncio.run(main())
+    
