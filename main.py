@@ -5,6 +5,7 @@ import machine
 import ujson
 import uasyncio
 import ntptime
+import ubinascii
 from micropython import const
 
 # SSID (name) and password of your WiFi network
@@ -74,6 +75,7 @@ async def attempt_connection(ssid, password):
             network_parameters = wlan.ifconfig()
             _logger('Connection to', ssid, 'successfully established!', sep=' ')
             _logger('Local IP address: ' + network_parameters[0])
+            _logger('MAC address: ' + ubinascii.hexlify(network.WLAN().config('mac'), ':').decode())
             attempting_connection = False
         else:
             _logger('Connection failed, reattempting...')
