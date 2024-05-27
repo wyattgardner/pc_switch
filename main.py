@@ -130,7 +130,7 @@ def _to_iso8601(local_time_tuple, tz_offset_hours=0, tz_offset_minutes=0):
     
     return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(year, month, day, hour, minute, second)
 
-async def receive_command(relay, socket):
+async def receive_command(relay, socket, port):
     while True:
         conn, addr, data, command = None, None, None, None
 
@@ -143,7 +143,7 @@ async def receive_command(relay, socket):
                 raise
         
         if conn != None:
-            _logger('Connection from', addr)
+            _logger('Connection on {} from {}'.format(port, addr))
 
             # Receive a command from the client
             while data == None:
@@ -204,8 +204,8 @@ async def main():
 
         _logger('Waiting for a socket connection...\n')
 
-        uasyncio.create_task(receive_command(RELAY1, s1))
-        uasyncio.create_task(receive_command(RELAY2, s2))
+        uasyncio.create_task(receive_command(RELAY1, s1, __PORT1))
+        uasyncio.create_task(receive_command(RELAY2, s2, __PORT2))
 
         while True:
             await uasyncio.sleep(1)
@@ -222,4 +222,3 @@ async def main():
 
 if __name__ == "__main__":
     uasyncio.run(main())
-    
