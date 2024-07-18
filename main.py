@@ -145,14 +145,20 @@ async def receive_command(relay, socket, port):
         if conn != None:
             _logger('Connection on {} from {}'.format(port, addr))
 
+            conn.settimeout(3)
             # Receive a command from the client
-            while data == None:
+            while True:
                 try:
                     data = conn.recv(1024)
                     if data != None:
                         data = data.decode()
                         command = ujson.loads(data)
+                        break
+
                 except OSError as e:
+                    if e.args[0] == 110: # ETIMEDOUT
+                        _logger('Connection timed out, closing...\n')
+                        break
                     if e.args[0] == 11: # EAGAIN
                         await uasyncio.sleep_ms(100)
                     else:
