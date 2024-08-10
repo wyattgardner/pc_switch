@@ -151,9 +151,15 @@ async def receive_command(relay, socket, port):
                 try:
                     data = conn.recv(1024)
                     if data != None:
-                        data = data.decode()
-                        command = ujson.loads(data)
-                        break
+                        try:
+                            data = data.decode()
+                            command = ujson.loads(data)
+                            break
+                        except ValueError as e:
+                            _logger('Invalid JSON received: {}'.format(e))
+                            break
+                    else:
+                        await uasyncio.sleep_ms(100)
 
                 except OSError as e:
                     if e.args[0] == 110: # ETIMEDOUT
