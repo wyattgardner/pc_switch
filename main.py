@@ -28,8 +28,10 @@ ENABLE_BLINKING = const(False)
 TIME_ZONE = const(-4)
 # Max time in seconds before restarting attempt to connect to WiFi
 WIFI_TIMEOUT = const(10)
-# Time in milliseconds that the relay is activated each time command is received
-RELAY_TIME = const(200)
+# Time in milliseconds that the relay is activated for power on command
+SHORT_RELAY_TIME = const(200)
+# Time in milliseconds that the relay is activated for force shutdown command
+LONG_RELAY_TIME = const(7000)
 # Asynchronous coroutine will check for WiFi connection drop every CHECK_TIME seconds, set to 0 to disable
 CHECK_TIME = const(180)
 
@@ -172,19 +174,27 @@ async def receive_command(relay, socket, port):
 
             # Excecute command to turn on PC
             if command != None:
-                if command['gpio'] == 'on':
-                    _logger('Command received!')
-                    _logger('Turning PC on...\n')
+                _logger('Command received!')
 
-                    if ENABLE_BLINKING:
+                if ENABLE_BLINKING:
                         uasyncio.create_task(_blinkLED(LED, 2))
 
+                if command['gpio'] == 'on':
+                    _logger('Turning PC on...\n')
+
                     relay.value(1)
-                    await uasyncio.sleep_ms(RELAY_TIME)
+                    await uasyncio.sleep_ms(SHORT_RELAY_TIME)
                     relay.value(0)
 
+                elif command['gpio'] == 'fs':
+                    _logger('Shutting off PC...\n')
+
+                    relay.value(1)
+                    await uasyncio.sleep_ms(LONG_RELAY_TIME)
+                    relay.value(0)
+                    
                 else:
-                    _logger('Error reading data packet\n')
+                    _logger('Error reading command\n')
 
             conn.close()
 
