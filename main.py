@@ -10,29 +10,29 @@ from micropython import const
 
 # SSID (name) and password of your WiFi network
 __SSID, __PASSWORD = const('your SSID'), const('your password')
-# Ports used for socket communication (default 7776)
-__PORT1 = const(7776)
-__PORT2 = const(7775)
-# GPIO Pins used for relays and onboard LED
-RELAY1 = machine.Pin(2, machine.Pin.OUT)
-RELAY2 = machine.Pin(3, machine.Pin.OUT)
+# GPIO Pins used for relays and their corresponding ports used for socket communication (default 7776)
+__RELAY_PORT1 = (machine.Pin(2, machine.Pin.OUT), const(7776))
+__RELAY_PORT2 = (machine.Pin(3, machine.Pin.OUT), const(7775))
+# Onboard LED GPIO
 LED = machine.Pin("LED", machine.Pin.OUT)
 # Enables logging to log.txt in root directory of Pico W
 # For testing/debugging purposes only, will eventually fill the board's 2 MB flash memory
 ENABLE_LOGGING = const(False)
-# Enables setting system time from an NTP server for timestamped logging
-ENABLE_SYSTEM_TIME = const(False)
 # Enables a 2 second rapid blink of the Pico W's onboard LED when receiving command to turn on PC
 ENABLE_BLINKING = const(False)
+# Enables a daily forced reboot at REBOOT_TIME (hour 0-23) daily
+ENABLE_REBOOTS = const(False)
+REBOOT_TIME = const(2)
+__REBOOT_RELAY = __RELAY_PORT2[0]
 # Time zone offset from UTC (e.g. -5 for EST)
-TIME_ZONE = const(-4)
+TIME_ZONE = const(-5)
 # Max time in seconds before restarting attempt to connect to WiFi
 WIFI_TIMEOUT = const(10)
 # Time in milliseconds that the relay is activated for power on command
 SHORT_RELAY_TIME = const(200)
 # Time in milliseconds that the relay is activated for force shutdown command
 LONG_RELAY_TIME = const(7000)
-# Asynchronous coroutine will check for WiFi connection drop every CHECK_TIME seconds, set to 0 to disable
+# Will check for WiFi connection drop every CHECK_TIME seconds, set to 0 to disable
 CHECK_TIME = const(180)
 
 # Initialize WiFi functionality
@@ -43,16 +43,14 @@ wlan.config(pm = 0xa11140) # Disable power saving mode
 if ENABLE_LOGGING:
     log_file = open('log.txt', 'a')
 
-if ENABLE_SYSTEM_TIME:
-    time_is_set = False
-
+time_is_set = False
 sockets_opened = False
 
 def _logger(*args, **kwargs):
     data = ' '.join(str(arg) for arg in args)
 
-    if ENABLE_SYSTEM_TIME and time_is_set:
-        data = _to_iso8601(time.localtime(), TIME_ZONE, 0) + ': ' + data
+    if time_is_set:
+        data = _to_iso8601(time.localtime(time.time() + (TIME_ZONE * 3600))) + ': ' + data
 
     print(data)
 
@@ -109,30 +107,39 @@ async def _blinkLED(led, seconds):
         led.value(0)
         await uasyncio.sleep_ms(50)
 
-def _to_iso8601(local_time_tuple, tz_offset_hours=0, tz_offset_minutes=0):
-    # Adjust hours and minutes for timezone offset
-    year, month, day, hour, minute, second, _, _ = local_time_tuple
-    hour += tz_offset_hours
-    minute += tz_offset_minutes
-    
-    # Handle overflow/underflow in hours and minutes
-    if minute >= 60:
-        hour += 1
-        minute -= 60
-    elif minute < 0:
-        hour -= 1
-        minute += 60
-    # Increment or decrement day, not handling month/year rollover for brevity
-    if hour >= 24:
-        day += 1
-        hour -= 24
-    elif hour < 0:
-        day -= 1 
-        hour += 24
-    
+def _to_iso8601(time_tuple):
+    year, month, day, hour, minute, second, _, _ = time_tuple
     return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(year, month, day, hour, minute, second)
 
-async def receive_command(relay, socket, port):
+async def power_on(relay):
+    _logger('Turning PC on...\n')
+
+    relay.value(1)
+    await uasyncio.sleep_ms(SHORT_RELAY_TIME)
+    relay.value(0)
+
+async def force_shutdown(relay):
+    _logger('Shutting off PC...\n')
+
+    relay.value(1)
+    await uasyncio.sleep_ms(LONG_RELAY_TIME)
+    relay.value(0)
+
+async def scheduled_reboot(relay):
+    while True:
+        current_time = time.localtime(time.time() + (TIME_ZONE * 3600))
+
+        if (current_time[3] == REBOOT_TIME and current_time[4] == 0):
+            _logger("Performing scheduled forced reboot...")
+
+            await force_shutdown(relay)
+            await uasyncio.sleep(3)
+            await power_on(relay)
+            await uasyncio.sleep(3600)
+        else:
+            await uasyncio.sleep(30)
+
+async def receive_command(socket, relay, port):
     while True:
         conn, addr, data, command = None, None, None, None
 
@@ -180,18 +187,10 @@ async def receive_command(relay, socket, port):
                         uasyncio.create_task(_blinkLED(LED, 2))
 
                 if command['gpio'] == 'on':
-                    _logger('Turning PC on...\n')
-
-                    relay.value(1)
-                    await uasyncio.sleep_ms(SHORT_RELAY_TIME)
-                    relay.value(0)
+                    await power_on(relay)
 
                 elif command['gpio'] == 'fs':
-                    _logger('Shutting off PC...\n')
-
-                    relay.value(1)
-                    await uasyncio.sleep_ms(LONG_RELAY_TIME)
-                    relay.value(0)
+                    await force_shutdown(relay)
                     
                 else:
                     _logger('Error reading command\n')
@@ -207,30 +206,31 @@ async def main():
         if CHECK_TIME > 0:
             uasyncio.create_task(check_connection(__SSID, __PASSWORD))
 
-        if ENABLE_SYSTEM_TIME:
-            ntptime.settime()
-            global time_is_set
-            time_is_set = True
-            _logger('System time set!')
+        ntptime.settime()
+        global time_is_set
+        time_is_set = True
+        _logger('System time set!')
 
         s1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s1.setblocking(False)
-        s1.bind(('0.0.0.0', __PORT1))
+        s1.bind(('0.0.0.0', __RELAY_PORT1[1]))
         s1.listen(1)
         s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s2.setblocking(False)
-        s2.bind(('0.0.0.0', __PORT2))
+        s2.bind(('0.0.0.0', __RELAY_PORT2[1]))
         s2.listen(1)
         global sockets_opened
         sockets_opened = True
 
         _logger('Waiting for a socket connection...\n')
 
-        uasyncio.create_task(receive_command(RELAY1, s1, __PORT1))
-        uasyncio.create_task(receive_command(RELAY2, s2, __PORT2))
+        uasyncio.create_task(receive_command(s1, *__RELAY_PORT1))
+        uasyncio.create_task(receive_command(s2, *__RELAY_PORT2))
+        if ENABLE_REBOOTS:
+            uasyncio.create_task(scheduled_reboot(__REBOOT_RELAY))
 
         while True:
-            await uasyncio.sleep(1)
+            await uasyncio.sleep(180)
 
     except Exception as e:
         _logger('An error occurred: ' + str(e))
