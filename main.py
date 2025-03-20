@@ -1,7 +1,7 @@
 import time
 import network
 import socket
-from machine import Pin,SPI,reset
+from machine import Pin, SPI, reset
 import ujson
 import uasyncio
 import ntptime
@@ -45,8 +45,8 @@ if WIRELESS_MODE:
     nic.active(True)
     nic.config(pm = 0xa11140) # Disable power saving mode
 else:
-    spi = SPI(0, 2_000_000, mosi=Pin(19),miso=Pin(16),sck=Pin(18))
-    nic = network.WIZNET5K(spi,Pin(17),Pin(20)) #spi, cs, reset pin
+    spi = SPI(0, 2_000_000, mosi=Pin(19), miso=Pin(16), sck=Pin(18))
+    nic = network.WIZNET5K(spi, Pin(17), Pin(20)) #spi, cs, reset pin
     nic.active(True)
 
 if ENABLE_LOGGING:
