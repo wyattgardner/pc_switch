@@ -1,20 +1,24 @@
 import time
 import network
 import socket
-import machine
+from machine import Pin,SPI,reset
 import ujson
 import uasyncio
 import ntptime
 import ubinascii
 from micropython import const
 
+# Toggles between wireless (WiFi) and wired (Ethernet) mode
+# Set to true for Pico W and false for W5500-EVB-Pico
+WIRELESS_MODE = const(True)
 # SSID (name) and password of your WiFi network
 __SSID, __PASSWORD = const('your SSID'), const('your password')
 # GPIO Pins used for relays and their corresponding ports used for socket communication (default 7776)
-__RELAY_PORT1 = (machine.Pin(2, machine.Pin.OUT), const(7776))
-__RELAY_PORT2 = (machine.Pin(3, machine.Pin.OUT), const(7775))
+__RELAY_PORT1 = (Pin(2, Pin.OUT), const(7776))
+__RELAY_PORT2 = (Pin(3, Pin.OUT), const(7775))
+__RELAY_PORT3 = (Pin(4, Pin.OUT), const(7774))
 # Onboard LED GPIO
-LED = machine.Pin("LED", machine.Pin.OUT)
+LED = Pin(25, Pin.OUT)
 # Enables logging to log.txt in root directory of Pico W
 # For testing/debugging purposes only, will eventually fill the board's 2 MB flash memory
 ENABLE_LOGGING = const(False)
@@ -22,12 +26,12 @@ ENABLE_LOGGING = const(False)
 ENABLE_BLINKING = const(False)
 # Enables a daily forced reboot at REBOOT_TIME (hour 0-23) daily
 ENABLE_REBOOTS = const(False)
-REBOOT_TIME = const(2)
+REBOOT_TIME = const(4)
 __REBOOT_RELAY = __RELAY_PORT2[0]
 # Time zone offset from UTC (e.g. -5 for EST)
 TIME_ZONE = const(-5)
-# Max time in seconds before restarting attempt to connect to WiFi
-WIFI_TIMEOUT = const(10)
+# Max time in seconds before restarting attempt to connect to network
+NETWORK_TIMEOUT = const(10)
 # Time in milliseconds that the relay is activated for power on command
 SHORT_RELAY_TIME = const(200)
 # Time in milliseconds that the relay is activated for force shutdown command
@@ -35,10 +39,15 @@ LONG_RELAY_TIME = const(7000)
 # Will check for WiFi connection drop every CHECK_TIME seconds, set to 0 to disable
 CHECK_TIME = const(180)
 
-# Initialize WiFi functionality
-wlan = network.WLAN(network.STA_IF)
-wlan.active(True)
-wlan.config(pm = 0xa11140) # Disable power saving mode
+# Initialize network functionality
+if WIRELESS_MODE:
+    nic = network.WLAN(network.STA_IF)
+    nic.active(True)
+    nic.config(pm = 0xa11140) # Disable power saving mode
+else:
+    spi = SPI(0, 2_000_000, mosi=Pin(19),miso=Pin(16),sck=Pin(18))
+    nic = network.WIZNET5K(spi,Pin(17),Pin(20)) #spi, cs, reset pin
+    nic.active(True)
 
 if ENABLE_LOGGING:
     log_file = open('log.txt', 'a')
@@ -46,11 +55,11 @@ if ENABLE_LOGGING:
 time_is_set = False
 sockets_opened = False
 
-def _logger(*args, **kwargs):
+def _logger(*args):
     data = ' '.join(str(arg) for arg in args)
 
     if time_is_set:
-        data = _to_iso8601(time.localtime(time.time() + (TIME_ZONE * 3600))) + ': ' + data
+        data = _to_iso8601(_get_localtime()) + ': ' + data
 
     print(data)
 
@@ -58,36 +67,40 @@ def _logger(*args, **kwargs):
         log_file.write(data + '\n')
         log_file.flush()
 
-async def attempt_connection(ssid, password):
+async def attempt_connection():
     attempting_connection = True
 
     while attempting_connection:
-        wlan.connect(ssid, password)
+        if WIRELESS_MODE:
+            nic.connect(__SSID, __PASSWORD)
+        else:
+            nic.ifconfig('dhcp')
         
-        _logger('Waiting for WiFi connection...')
+        _logger('Waiting for network connection...')
 
-        wifi_timeout = WIFI_TIMEOUT
-        while not wlan.isconnected() and wifi_timeout > 0:
-            wifi_timeout -= 1
+        network_timeout = NETWORK_TIMEOUT
+        while not nic.isconnected() and network_timeout > 0:
+            network_timeout -= 1
             await uasyncio.sleep(1)
 
-        if wlan.isconnected():
-            network_parameters = wlan.ifconfig()
-            _logger('Connection to', ssid, 'successfully established!', sep=' ')
-            _logger('Local IP address: ' + network_parameters[0])
-            _logger('MAC address: ' + ubinascii.hexlify(network.WLAN().config('mac'), ':').decode())
+        if nic.isconnected():
+            network_parameters = nic.ifconfig()
+            mac = ubinascii.hexlify(nic.config('mac'), ':').decode()
+            _logger(f"Connection to {__SSID if WIRELESS_MODE else 'network'} successfully established!")
+            _logger(f"Local IP address: {network_parameters[0]}")
+            _logger(f"MAC Address: {mac}")
             attempting_connection = False
         else:
             _logger('Connection failed, reattempting...')
             await uasyncio.sleep(1)
 
-async def check_connection(ssid, password):
+async def check_connection():
     while True:
-        if not _ping():
-            _logger('WiFi connection dropped or network is offline. Attempting reconnection...')
-            await attempt_connection(ssid, password)
-        
         await uasyncio.sleep(CHECK_TIME)
+
+        if not _ping():
+            _logger('Network connection dropped, attempting reconnection...')
+            await attempt_connection()
     
 def _ping(host='8.8.8.8', port=53, timeout=3):
     try:
@@ -98,7 +111,13 @@ def _ping(host='8.8.8.8', port=53, timeout=3):
         return True
     except OSError as e:
         return False
-
+    
+def _get_socket(ip='0.0.0.0', port=7776):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setblocking(False)
+    sock.bind((ip, port))
+    sock.listen(1)
+    return sock
 
 async def _blinkLED(led, seconds):
     for i in range(int(seconds * 10)):
@@ -110,6 +129,9 @@ async def _blinkLED(led, seconds):
 def _to_iso8601(time_tuple):
     year, month, day, hour, minute, second, _, _ = time_tuple
     return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(year, month, day, hour, minute, second)
+
+def _get_localtime():
+    return time.localtime(time.time() + (TIME_ZONE * 3600))
 
 async def power_on(relay):
     _logger('Turning PC on...\n')
@@ -127,7 +149,7 @@ async def force_shutdown(relay):
 
 async def scheduled_reboot(relay):
     while True:
-        current_time = time.localtime(time.time() + (TIME_ZONE * 3600))
+        current_time = _get_localtime()
 
         if (current_time[3] == REBOOT_TIME and current_time[4] == 0):
             _logger("Performing scheduled forced reboot...")
@@ -201,24 +223,19 @@ async def main():
     try:
         _logger('Beginning a new session')
 
-        await attempt_connection(__SSID, __PASSWORD)
+        await attempt_connection()
 
         if CHECK_TIME > 0:
-            uasyncio.create_task(check_connection(__SSID, __PASSWORD))
+            uasyncio.create_task(check_connection())
 
         ntptime.settime()
         global time_is_set
         time_is_set = True
         _logger('System time set!')
 
-        s1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s1.setblocking(False)
-        s1.bind(('0.0.0.0', __RELAY_PORT1[1]))
-        s1.listen(1)
-        s2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s2.setblocking(False)
-        s2.bind(('0.0.0.0', __RELAY_PORT2[1]))
-        s2.listen(1)
+        s1 = _get_socket(port=__RELAY_PORT1[1])
+        s2 = _get_socket(port=__RELAY_PORT2[1])
+        s3 = _get_socket(port=__RELAY_PORT3[1])
         global sockets_opened
         sockets_opened = True
 
@@ -226,6 +243,7 @@ async def main():
 
         uasyncio.create_task(receive_command(s1, *__RELAY_PORT1))
         uasyncio.create_task(receive_command(s2, *__RELAY_PORT2))
+        uasyncio.create_task(receive_command(s3, *__RELAY_PORT3))
         if ENABLE_REBOOTS:
             uasyncio.create_task(scheduled_reboot(__REBOOT_RELAY))
 
@@ -240,7 +258,8 @@ async def main():
         if sockets_opened:
             s1.close()
             s2.close()
-        machine.reset()
+            s3.close()
+        reset()
 
 if __name__ == "__main__":
     uasyncio.run(main())
