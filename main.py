@@ -36,7 +36,7 @@ NETWORK_TIMEOUT = const(10)
 SHORT_RELAY_TIME = const(200)
 # Time in milliseconds that the relay is activated for force shutdown command
 LONG_RELAY_TIME = const(7000)
-# Will check for WiFi connection drop every CHECK_TIME seconds, set to 0 to disable
+# Will check for network connection drop every CHECK_TIME seconds, set to 0 to disable
 CHECK_TIME = const(180)
 
 # Initialize network functionality
@@ -147,16 +147,21 @@ async def force_shutdown(relay):
     await uasyncio.sleep_ms(LONG_RELAY_TIME)
     relay.value(0)
 
-async def scheduled_reboot(relay):
+async def daily_task(reboot_relay=None):
     while True:
         current_time = _get_localtime()
 
         if (current_time[3] == REBOOT_TIME and current_time[4] == 0):
-            _logger("Performing scheduled forced reboot...")
+            if ENABLE_REBOOTS:
+                _logger("Performing scheduled forced reboot...")
 
-            await force_shutdown(relay)
-            await uasyncio.sleep(3)
-            await power_on(relay)
+                await force_shutdown(reboot_relay)
+                await uasyncio.sleep(3)
+                await power_on(reboot_relay)
+
+            _logger("Syncing RTC...")
+            ntptime.settime()
+            _logger("Synced!")
             await uasyncio.sleep(3600)
         else:
             await uasyncio.sleep(30)
@@ -244,8 +249,7 @@ async def main():
         uasyncio.create_task(receive_command(s1, *__RELAY_PORT1))
         uasyncio.create_task(receive_command(s2, *__RELAY_PORT2))
         uasyncio.create_task(receive_command(s3, *__RELAY_PORT3))
-        if ENABLE_REBOOTS:
-            uasyncio.create_task(scheduled_reboot(__REBOOT_RELAY))
+        uasyncio.create_task(daily_task(__REBOOT_RELAY))
 
         while True:
             await uasyncio.sleep(180)
