@@ -131,7 +131,7 @@ async def _blinkLED(led, seconds):
         await uasyncio.sleep_ms(50)
 
 def _check_dst():
-    year, month, mday, _, _, _, _, _ = time.localtime()
+    year, month, mday, _, _, _, _, _ = _get_localtime()
 
     def _weekday(year, month, day):
         if month < 3:
