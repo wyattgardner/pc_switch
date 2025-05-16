@@ -26,10 +26,13 @@ ENABLE_LOGGING = const(False)
 ENABLE_BLINKING = const(False)
 # Enables a daily forced reboot at REBOOT_TIME (hour 0-23) daily
 ENABLE_REBOOTS = const(False)
-REBOOT_TIME = const(4)
-__REBOOT_RELAY = __RELAY_PORT2[0]
+REBOOT_TIME = const(5)
+__REBOOT_RELAY = __RELAY_PORT1[0]
 # Time zone offset from UTC (e.g. -5 for EST)
 TIME_ZONE = const(-5)
+# Enables correction for NA daylight savings time
+# Assumes TIME_ZONE is set to standard time
+CHECK_DST = const(True)
 # Max time in seconds before restarting attempt to connect to network
 NETWORK_TIMEOUT = const(10)
 # Time in milliseconds that the relay is activated for power on command
@@ -54,12 +57,13 @@ if ENABLE_LOGGING:
 
 time_is_set = False
 sockets_opened = False
+in_dst = False
 
 def _logger(*args):
     data = ' '.join(str(arg) for arg in args)
 
     if time_is_set:
-        data = _to_iso8601(_get_localtime()) + ': ' + data
+        data = _iso8601_time() + ': ' + data
 
     print(data)
 
@@ -126,12 +130,47 @@ async def _blinkLED(led, seconds):
         led.value(0)
         await uasyncio.sleep_ms(50)
 
-def _to_iso8601(time_tuple):
-    year, month, day, hour, minute, second, _, _ = time_tuple
-    return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(year, month, day, hour, minute, second)
+def _check_dst():
+    year, month, mday, _, _, _, _, _ = time.localtime()
+
+    def _weekday(year, month, day):
+        if month < 3:
+            month += 12
+            year -= 1
+        k = year % 100
+        j = year // 100
+        h = (day + (13 * (month + 1)) // 5 + k + k // 4 + j // 4 + 5 * j) % 7
+        return (h + 5) % 7
+    
+    # Find second Sunday in March
+    mar1_wd = _weekday(year, 3, 1)
+    second_sun_mar = 1 + ((6 - mar1_wd) % 7) + 7
+
+    # Find first Sunday in November
+    nov1_wd = _weekday(year, 11, 1)
+    first_sun_nov = 1 + ((6 - nov1_wd) % 7)
+
+    # Determine if DST is active
+    global in_dst
+    if 3 < month < 11:
+        in_dst = True
+    elif month == 3 and mday >= second_sun_mar:
+        in_dst = True
+    elif month == 11 and mday < first_sun_nov:
+        in_dst = True
+    else:
+        in_dst = False
 
 def _get_localtime():
-    return time.localtime(time.time() + (TIME_ZONE * 3600))
+    tz = TIME_ZONE
+    if in_dst:
+        tz += 1
+
+    return time.localtime(time.time() + (tz * 3600))
+
+def _iso8601_time():
+    year, month, day, hour, minute, second, _, _ = _get_localtime()
+    return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(year, month, day, hour, minute, second)
 
 async def power_on(relay):
     _logger('Turning PC on...\n')
@@ -160,7 +199,11 @@ async def daily_task(reboot_relay=None):
                 await power_on(reboot_relay)
 
             _logger("Syncing RTC...")
+
             ntptime.settime()
+            if CHECK_DST:
+                _check_dst()
+
             _logger("Synced!")
             await uasyncio.sleep(3600)
         else:
@@ -234,6 +277,8 @@ async def main():
             uasyncio.create_task(check_connection())
 
         ntptime.settime()
+        if CHECK_DST:
+                _check_dst()
         global time_is_set
         time_is_set = True
         _logger('System time set!')
