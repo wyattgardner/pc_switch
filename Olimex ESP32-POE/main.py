@@ -6,6 +6,7 @@ import ujson
 import uasyncio
 import ntptime
 import ubinascii
+import uos
 from micropython import const
 
 # GPIO Pins used for relays and their corresponding ports used for socket communication (default 7776)
@@ -180,15 +181,18 @@ async def force_shutdown(relay):
     await uasyncio.sleep_ms(LONG_RELAY_TIME)
     relay.value(0)
 
-async def _run_command(gpio, relay, lock):
+async def _run_command(gpio, relay, lock, queue):
     if lock.locked():
-        _logger("Busy, command queued...")
+        _logger("Busy, command queued...\n")
 
-    async with lock:
-        if gpio == 'on':
-            await power_on(relay)
-        else:
-            await force_shutdown(relay)
+    try:
+        async with lock:
+            if gpio == 'on':
+                await power_on(relay)
+            else:
+                await force_shutdown(relay)
+    finally:
+        queue[0] -= 1
 
 async def daily_task(reboot_relay=None):
     while True:
@@ -216,8 +220,10 @@ async def daily_task(reboot_relay=None):
             await uasyncio.sleep(30)
 
 async def receive_command(socket, relay, port):
-    # Serializes relay actions on this port so commands queue instead of overlapping
+    # Serializes relay actions on this port, at most one command waits behind the running one
     lock = uasyncio.Lock()
+    # Running command plus the queued one
+    queue = [0]
 
     while True:
         conn, addr, data, command = None, None, None, None
@@ -262,19 +268,25 @@ async def receive_command(socket, relay, port):
             if command != None:
                 _logger("Command received!")
 
-                try:
-                    conn.sendall(ujson.dumps({'status': 'ack'}) + '\n')
-                except OSError as e:
-                    _logger("Failed to send acknowledgement: {}".format(e))
-
                 if ENABLE_BLINKING:
                         uasyncio.create_task(_blinkLED(LED, 2))
 
                 gpio = command.get('gpio')
-                if gpio == 'on' or gpio == 'fs':
-                    uasyncio.create_task(_run_command(gpio, relay, lock))
-                else:
+                if gpio != 'on' and gpio != 'fs':
+                    status = 'error'
                     _logger("Error reading command\n")
+                elif queue[0] >= 2:
+                    status = 'full'
+                    _logger("Busy, command queue full...\n")
+                else:
+                    status = 'ack'
+                    queue[0] += 1
+                    uasyncio.create_task(_run_command(gpio, relay, lock, queue))
+
+                try:
+                    conn.sendall(ujson.dumps({'status': status}) + '\n')
+                except OSError as e:
+                    _logger("Failed to send acknowledgement: {}".format(e))
 
             conn.close()
 
@@ -287,7 +299,7 @@ async def sync_time():
             if CHECK_DST:
                 _check_dst()
             time_is_set = True
-            _logger("System time set!")
+            _logger("System time set!\n")
             return
         except OSError as e:
             _logger("Failed to sync time, retrying: {}".format(e))
@@ -296,6 +308,7 @@ async def sync_time():
 async def main():
     try:
         _logger("Beginning a new session")
+        _logger("Board: {} {}".format(uos.uname().machine, '(wired)'))
 
         await attempt_connection()
 
