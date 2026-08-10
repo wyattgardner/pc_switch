@@ -1,4 +1,4 @@
-import time
+﻿import time
 import network
 import socket
 from machine import Pin, SPI, reset
@@ -41,16 +41,23 @@ SHORT_RELAY_TIME = const(200)
 LONG_RELAY_TIME = const(7000)
 # Will check for network connection drop every CHECK_TIME seconds, set to 0 to disable
 CHECK_TIME = const(180)
+# Max time in seconds to wait for a response when syncing time
+NTP_TIMEOUT = const(5)
 
 # Initialize network functionality
 if WIRELESS_MODE:
     nic = network.WLAN(network.STA_IF)
+    # Clears any association left over from a soft reset
+    nic.active(False)
+    time.sleep(1)
     nic.active(True)
     nic.config(pm = 0xa11140) # Disable power saving mode
 else:
     spi = SPI(0, 2_000_000, mosi=Pin(19), miso=Pin(16), sck=Pin(18))
     nic = network.WIZNET5K(spi, Pin(17), Pin(20)) #spi, cs, reset pin
     nic.active(True)
+
+ntptime.timeout = NTP_TIMEOUT
 
 if ENABLE_LOGGING:
     log_file = open('log.txt', 'a')
@@ -80,7 +87,7 @@ async def attempt_connection():
         else:
             nic.ifconfig('dhcp')
         
-        _logger('Waiting for network connection...')
+        _logger("Waiting for network connection...")
 
         network_timeout = NETWORK_TIMEOUT
         while not nic.isconnected() and network_timeout > 0:
@@ -95,7 +102,10 @@ async def attempt_connection():
             _logger(f"MAC Address: {mac}")
             attempting_connection = False
         else:
-            _logger('Connection failed, reattempting...')
+            if WIRELESS_MODE:
+                _logger("Connection failed (status {}), reattempting...".format(nic.status()))
+            else:
+                _logger("Connection failed, reattempting...")
             await uasyncio.sleep(1)
 
 async def check_connection():
@@ -103,7 +113,7 @@ async def check_connection():
         await uasyncio.sleep(CHECK_TIME)
 
         if not _ping():
-            _logger('Network connection dropped, attempting reconnection...')
+            _logger("Network connection dropped, attempting reconnection...")
             await attempt_connection()
     
 def _ping(host='8.8.8.8', port=53, timeout=3):
@@ -173,18 +183,28 @@ def _iso8601_time():
     return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}".format(year, month, day, hour, minute, second)
 
 async def power_on(relay):
-    _logger('Turning PC on...\n')
+    _logger("Turning PC on...\n")
 
     relay.value(1)
     await uasyncio.sleep_ms(SHORT_RELAY_TIME)
     relay.value(0)
 
 async def force_shutdown(relay):
-    _logger('Shutting off PC...\n')
+    _logger("Shutting off PC...\n")
 
     relay.value(1)
     await uasyncio.sleep_ms(LONG_RELAY_TIME)
     relay.value(0)
+
+async def _run_command(gpio, relay, lock):
+    if lock.locked():
+        _logger("Busy, command queued...")
+
+    async with lock:
+        if gpio == 'on':
+            await power_on(relay)
+        else:
+            await force_shutdown(relay)
 
 async def daily_task(reboot_relay=None):
     while True:
@@ -200,16 +220,21 @@ async def daily_task(reboot_relay=None):
 
             _logger("Syncing RTC...")
 
-            ntptime.settime()
-            if CHECK_DST:
-                _check_dst()
-
-            _logger("Synced!")
+            try:
+                ntptime.settime()
+                if CHECK_DST:
+                    _check_dst()
+                _logger("Synced!")
+            except OSError as e:
+                _logger("Failed to sync RTC: {}".format(e))
             await uasyncio.sleep(3600)
         else:
             await uasyncio.sleep(30)
 
 async def receive_command(socket, relay, port):
+    # Serializes relay actions on this port so commands queue instead of overlapping
+    lock = uasyncio.Lock()
+
     while True:
         conn, addr, data, command = None, None, None, None
 
@@ -222,7 +247,7 @@ async def receive_command(socket, relay, port):
                 raise
         
         if conn != None:
-            _logger('Connection on {} from {}'.format(port, addr))
+            _logger("Connection on {} from {}".format(port, addr))
 
             conn.settimeout(3)
             # Receive a command from the client
@@ -235,14 +260,14 @@ async def receive_command(socket, relay, port):
                             command = ujson.loads(data)
                             break
                         except ValueError as e:
-                            _logger('Invalid JSON received: {}'.format(e))
+                            _logger("Invalid JSON received: {}".format(e))
                             break
                     else:
                         await uasyncio.sleep_ms(100)
 
                 except OSError as e:
                     if e.args[0] == 110: # ETIMEDOUT
-                        _logger('Connection timed out, closing...\n')
+                        _logger("Connection timed out, closing...\n")
                         break
                     if e.args[0] == 11: # EAGAIN
                         await uasyncio.sleep_ms(100)
@@ -251,37 +276,47 @@ async def receive_command(socket, relay, port):
 
             # Excecute command to turn on PC
             if command != None:
-                _logger('Command received!')
+                _logger("Command received!")
+
+                try:
+                    conn.sendall(ujson.dumps({'status': 'ack'}) + '\n')
+                except OSError as e:
+                    _logger("Failed to send acknowledgement: {}".format(e))
 
                 if ENABLE_BLINKING:
                         uasyncio.create_task(_blinkLED(LED, 2))
 
-                if command['gpio'] == 'on':
-                    await power_on(relay)
-
-                elif command['gpio'] == 'fs':
-                    await force_shutdown(relay)
-                    
+                gpio = command.get('gpio')
+                if gpio == 'on' or gpio == 'fs':
+                    uasyncio.create_task(_run_command(gpio, relay, lock))
                 else:
-                    _logger('Error reading command\n')
+                    _logger("Error reading command\n")
 
             conn.close()
 
+async def sync_time():
+    global time_is_set
+
+    while True:
+        try:
+            ntptime.settime()
+            if CHECK_DST:
+                _check_dst()
+            time_is_set = True
+            _logger("System time set!")
+            return
+        except OSError as e:
+            _logger("Failed to sync time, retrying: {}".format(e))
+            await uasyncio.sleep(10)
+
 async def main():
     try:
-        _logger('Beginning a new session')
+        _logger("Beginning a new session")
 
         await attempt_connection()
 
         if CHECK_TIME > 0:
             uasyncio.create_task(check_connection())
-
-        ntptime.settime()
-        if CHECK_DST:
-                _check_dst()
-        global time_is_set
-        time_is_set = True
-        _logger('System time set!')
 
         s1 = _get_socket(port=__RELAY_PORT1[1])
         s2 = _get_socket(port=__RELAY_PORT2[1])
@@ -289,19 +324,20 @@ async def main():
         global sockets_opened
         sockets_opened = True
 
-        _logger('Waiting for a socket connection...\n')
+        _logger("Waiting for a socket connection...\n")
 
         uasyncio.create_task(receive_command(s1, *__RELAY_PORT1))
         uasyncio.create_task(receive_command(s2, *__RELAY_PORT2))
         uasyncio.create_task(receive_command(s3, *__RELAY_PORT3))
         uasyncio.create_task(daily_task(__REBOOT_RELAY))
+        uasyncio.create_task(sync_time())
 
         while True:
             await uasyncio.sleep(180)
 
     except Exception as e:
-        _logger('An error occurred: ' + str(e))
-        _logger('Ending session and restarting...\n\n')
+        _logger("An error occurred: " + str(e))
+        _logger("Ending session and restarting...\n\n")
         if ENABLE_LOGGING:
             log_file.close()
         if sockets_opened:
