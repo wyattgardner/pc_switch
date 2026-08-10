@@ -1,6 +1,8 @@
 import time
+import errno
 import network
 import socket
+import uselect
 from machine import Pin, SPI, reset
 import ujson
 import uasyncio
@@ -113,19 +115,33 @@ async def check_connection():
     while True:
         await uasyncio.sleep(CHECK_TIME)
 
-        if not _ping():
+        if not await _ping():
             _logger("Network connection dropped, attempting reconnection...")
             await attempt_connection()
     
-def _ping(host='8.8.8.8', port=53, timeout=3):
+async def _ping(host='8.8.8.8', port=53, timeout=3):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        s.connect((host, port))
-        s.close()
-        return True
-    except OSError as e:
+        sock.setblocking(False)
+        addr = socket.getaddrinfo(host, port)[0][-1]
+        try:
+            sock.connect(addr)
+        except OSError as e:
+            # A non-blocking connect reports EINPROGRESS instead of completing here
+            if e.args[0] != errno.EINPROGRESS:
+                return False
+        poller = uselect.poll()
+        poller.register(sock, uselect.POLLOUT)
+        for _ in range(int(timeout * 10)):
+            events = poller.poll(0)
+            if events:
+                return not (events[0][1] & (uselect.POLLERR | uselect.POLLHUP))
+            await uasyncio.sleep_ms(100)
         return False
+    except OSError:
+        return False
+    finally:
+        sock.close()
     
 def _get_socket(ip='0.0.0.0', port=7776):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -247,7 +263,7 @@ async def receive_command(socket, relay, port):
         try:
             conn, addr = socket.accept()
         except OSError as e:
-            if e.args[0] == 11: # EAGAIN
+            if e.args[0] == errno.EAGAIN:
                 await uasyncio.sleep_ms(100)
             else:
                 raise
@@ -272,10 +288,10 @@ async def receive_command(socket, relay, port):
                         await uasyncio.sleep_ms(100)
 
                 except OSError as e:
-                    if e.args[0] == 110: # ETIMEDOUT
+                    if e.args[0] == errno.ETIMEDOUT:
                         _logger("Connection timed out, closing...\n")
                         break
-                    if e.args[0] == 11: # EAGAIN
+                    if e.args[0] == errno.EAGAIN:
                         await uasyncio.sleep_ms(100)
                     else:
                         raise

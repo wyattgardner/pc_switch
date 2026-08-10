@@ -1,6 +1,8 @@
 import time
+import errno
 import network
 import socket
+import uselect
 from machine import Pin, reset
 import ujson
 import uasyncio
@@ -13,12 +15,14 @@ from micropython import const
 __RELAY_PORT1 = (Pin(32, Pin.OUT), const(7776))
 __RELAY_PORT2 = (Pin(33, Pin.OUT), const(7775))
 __RELAY_PORT3 = (Pin(4, Pin.OUT), const(7774))
-# Onboard LED GPIO
-LED = Pin(5, Pin.OUT)
+# Optional external LED GPIO
+# The 4 onboard LEDs are wired to the power rail and the Ethernet PHY, not to the ESP32,
+# so none of them can be driven from code and blinking does nothing without an external LED
+LED = Pin(13, Pin.OUT)
 # Enables logging to log.txt in root directory of the board
 # For testing/debugging purposes only, will eventually fill the board's 2 MB flash memory
 ENABLE_LOGGING = const(False)
-# Enables a 2 second rapid blink of the onboard LED when receiving command to turn on PC
+# Enables a 2 second rapid blink of the external LED when receiving command to turn on PC
 ENABLE_BLINKING = const(False)
 # Enables a daily forced reboot at REBOOT_TIME (hour 0-23) daily
 ENABLE_REBOOTS = const(False)
@@ -42,9 +46,9 @@ NTP_TIMEOUT = const(5)
 
 # Initialize network functionality
 nic = network.LAN(
-    mdc=Pin(23), mdio=Pin(18), power=Pin(12),
+    0, mdc=Pin(23), mdio=Pin(18), power=Pin(12),
     phy_type=network.PHY_LAN8720, phy_addr=0,
-    clock_mode=network.ETH_CLOCK_GPIO17_OUT,
+    ref_clk=Pin(17), ref_clk_mode=Pin.OUT,
 )
 nic.active(True)
 
@@ -73,7 +77,10 @@ async def attempt_connection():
     attempting_connection = True
 
     while attempting_connection:
-        nic.ifconfig('dhcp')
+        # Bouncing the interface restarts DHCP, ifconfig('dhcp') raises 0x5004 since active(True) already started it
+        nic.active(False)
+        await uasyncio.sleep(1)
+        nic.active(True)
 
         _logger("Waiting for network connection...")
 
@@ -97,19 +104,33 @@ async def check_connection():
     while True:
         await uasyncio.sleep(CHECK_TIME)
 
-        if not _ping():
+        if not await _ping():
             _logger("Network connection dropped, attempting reconnection...")
             await attempt_connection()
     
-def _ping(host='8.8.8.8', port=53, timeout=3):
+async def _ping(host='8.8.8.8', port=53, timeout=3):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        s.connect((host, port))
-        s.close()
-        return True
-    except OSError as e:
+        sock.setblocking(False)
+        addr = socket.getaddrinfo(host, port)[0][-1]
+        try:
+            sock.connect(addr)
+        except OSError as e:
+            # A non-blocking connect reports EINPROGRESS instead of completing here
+            if e.args[0] != errno.EINPROGRESS:
+                return False
+        poller = uselect.poll()
+        poller.register(sock, uselect.POLLOUT)
+        for _ in range(int(timeout * 10)):
+            events = poller.poll(0)
+            if events:
+                return not (events[0][1] & (uselect.POLLERR | uselect.POLLHUP))
+            await uasyncio.sleep_ms(100)
         return False
+    except OSError:
+        return False
+    finally:
+        sock.close()
     
 def _get_socket(ip='0.0.0.0', port=7776):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -231,7 +252,7 @@ async def receive_command(socket, relay, port):
         try:
             conn, addr = socket.accept()
         except OSError as e:
-            if e.args[0] == 11: # EAGAIN
+            if e.args[0] == errno.EAGAIN:
                 await uasyncio.sleep_ms(100)
             else:
                 raise
@@ -256,10 +277,10 @@ async def receive_command(socket, relay, port):
                         await uasyncio.sleep_ms(100)
 
                 except OSError as e:
-                    if e.args[0] == 110: # ETIMEDOUT
+                    if e.args[0] == errno.ETIMEDOUT:
                         _logger("Connection timed out, closing...\n")
                         break
-                    if e.args[0] == 11: # EAGAIN
+                    if e.args[0] == errno.EAGAIN:
                         await uasyncio.sleep_ms(100)
                     else:
                         raise
