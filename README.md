@@ -57,6 +57,12 @@ The board answers with a response and, for `reboot_board`, restarts right after 
 
 Each relay listens on its own port and handles one request at a time, queueing at most one behind the running command. send_command.py sends any of these, and the [Android app](https://github.com/wyattgardner/pc_switch_app) sends `turn_pc_on` and `force_shutdown_pc`.
 
+send_command.py usage:
+
+```
+python send_command.py <LAN IP> <request> -p <relay port>
+```
+
 # Updating over the network
 boot.py turns on WebREPL so you can update main.py without pulling the board back to a USB port.
 
@@ -75,11 +81,7 @@ python webrepl_cli.py -p <boot.py password> main.py <LAN IP>:/main.py
 python send_command.py <LAN IP>
 ```
 
-The board responds with `{"response": "ack"}` and then restarts. send_command.py also sends the other requests and takes `-p` to pick a relay's port, so `python send_command.py <LAN IP> turn_pc_on -p 7775` turns on the PC wired to the second relay.
-
 Run the push command from that directory rather than passing a full path, since `C:\...` reads as a second remote target. Keep WebREPL on the LAN and don't forward port 8266, it's plaintext with a weak password scheme.
-
-A pushed main.py sits on the board unused until that restart, so nothing changes until you send the command. If the new file raises on import the board loses the relay ports and `reboot_board` with them, leaving USB as the only way back, so keep the board reachable when pushing anything structural.
 
 # Raspberry Pi Pico W
 Uses WiFi, so nothing but power has to reach the board.
