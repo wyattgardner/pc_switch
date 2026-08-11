@@ -20,7 +20,7 @@ __SSID, __PASSWORD = const('your SSID'), const('your password')
 # Add or remove (GPIO, port) pairs to serve any number of relays
 __RELAY_ASSIGNMENTS = ((2, 7776), (3, 7775), (4, 7774))
 # Onboard LED GPIO
-LED = Pin(25, Pin.OUT)
+LED = Pin('LED', Pin.OUT)
 # Enables logging to log.txt in root directory of Pico W
 # For testing/debugging purposes only, will eventually fill the board's 2 MB flash memory
 ENABLE_LOGGING = const(False)
