@@ -40,11 +40,13 @@ boot.py turns on WebREPL so you can update main.py without pulling the board bac
 python webrepl_cli.py -p <boot.py password> main.py <LAN IP>:/main.py
 ```
 
-5. Apply the update by restarting the board. Send it a `reboot_board` command on any of its relay ports, which it acknowledges before restarting:
+5. Apply the update by restarting the board with send_command.py, which sends a `reboot_board` command by default:
 
 ```
-python -c "import socket,json; s=socket.socket(); s.connect(('<LAN IP>',7776)); s.sendall(json.dumps({'gpio':'reboot_board'}).encode()); print(s.recv(128))"
+python send_command.py <LAN IP>
 ```
+
+The board acknowledges with `{"status": "ack"}` and then restarts. send_command.py also sends the other commands (`on`, `fs`) and takes `-p` to pick a relay's port, so `python send_command.py <LAN IP> on -p 7775` turns on the PC wired to the second relay.
 
 Run the push command from that directory rather than passing a full path, since `C:\...` reads as a second remote target. Keep WebREPL on the LAN and don't forward port 8266, it's plaintext with a weak password scheme.
 
