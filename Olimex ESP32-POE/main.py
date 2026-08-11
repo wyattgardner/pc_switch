@@ -11,10 +11,9 @@ import ubinascii
 import uos
 from micropython import const
 
-# GPIO Pins used for relays and their corresponding ports used for socket communication (default 7776)
-__RELAY_PORT1 = (Pin(32, Pin.OUT), const(7776))
-__RELAY_PORT2 = (Pin(33, Pin.OUT), const(7775))
-__RELAY_PORT3 = (Pin(4, Pin.OUT), const(7774))
+# GPIO pins used for relays and their corresponding ports used for socket communication (default 7776)
+# Add or remove (GPIO, port) pairs to serve any number of relays
+__RELAY_ASSIGNMENTS = ((32, 7776), (33, 7775), (4, 7774))
 # Optional external LED GPIO
 # The 4 onboard LEDs are wired to the power rail and the Ethernet PHY, not to the ESP32,
 # so none of them can be driven from code and blinking does nothing without an external LED
@@ -27,7 +26,8 @@ ENABLE_BLINKING = const(False)
 # Enables a daily forced reboot at REBOOT_TIME (hour 0-23) daily
 ENABLE_REBOOTS = const(False)
 REBOOT_TIME = const(5)
-__REBOOT_RELAY = __RELAY_PORT1[0]
+# Relay the forced reboot acts on, as an index into __RELAY_ASSIGNMENTS
+__REBOOT_RELAY_INDEX = const(0)
 # Time zone offset from UTC (e.g. -5 for EST)
 TIME_ZONE = const(-5)
 # Enables correction for NA daylight savings time
@@ -43,6 +43,9 @@ LONG_RELAY_TIME = const(7000)
 CHECK_TIME = const(180)
 # Max time in seconds to wait for a response when syncing time
 NTP_TIMEOUT = const(5)
+# Attempts each RTC sync makes before giving up, and seconds between them
+SYNC_ATTEMPTS = const(5)
+SYNC_RETRY_TIME = const(10)
 
 # Initialize network functionality
 nic = network.LAN(
@@ -50,6 +53,9 @@ nic = network.LAN(
     phy_type=network.PHY_LAN8720, phy_addr=0,
     ref_clk=Pin(17), ref_clk_mode=Pin.OUT,
 )
+# Bouncing the interface here starts DHCP once, ifconfig('dhcp') later raises 0x5004 because of it
+nic.active(False)
+time.sleep(1)
 nic.active(True)
 
 ntptime.timeout = NTP_TIMEOUT
@@ -58,8 +64,9 @@ if ENABLE_LOGGING:
     log_file = open('log.txt', 'a')
 
 time_is_set = False
-sockets_opened = False
 in_dst = False
+# One listening socket per relay, filled in by main()
+sockets = []
 
 def _logger(*args):
     data = ' '.join(str(arg) for arg in args)
@@ -73,15 +80,20 @@ def _logger(*args):
         log_file.write(data + '\n')
         log_file.flush()
 
-async def attempt_connection():
+def _relays(*assignments):
+    # Each assignment is a (GPIO, port) pair, one listening socket is opened per relay
+    relays = tuple((Pin(gpio, Pin.OUT, value=0), port) for gpio, port in assignments)
+
+    _logger("Relays initialized: " + ', '.join("GPIO{} on port {}".format(gpio, port) for gpio, port in assignments))
+
+    return relays
+
+__RELAYS = _relays(*__RELAY_ASSIGNMENTS)
+
+async def _attempt_connection():
     attempting_connection = True
 
     while attempting_connection:
-        # Bouncing the interface restarts DHCP, ifconfig('dhcp') raises 0x5004 since active(True) already started it
-        nic.active(False)
-        await uasyncio.sleep(1)
-        nic.active(True)
-
         _logger("Waiting for network connection...")
 
         network_timeout = NETWORK_TIMEOUT
@@ -100,13 +112,13 @@ async def attempt_connection():
             _logger("Connection failed, reattempting...")
             await uasyncio.sleep(1)
 
-async def check_connection():
+async def _check_connection():
     while True:
         await uasyncio.sleep(CHECK_TIME)
 
         if not await _ping():
             _logger("Network connection dropped, attempting reconnection...")
-            await attempt_connection()
+            await _attempt_connection()
     
 async def _ping(host='8.8.8.8', port=53, timeout=3):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -139,7 +151,7 @@ def _get_socket(ip='0.0.0.0', port=7776):
     sock.listen(1)
     return sock
 
-async def _blinkLED(led, seconds):
+async def blink_LED(led, seconds):
     for i in range(int(seconds * 10)):
         led.value(1)
         await uasyncio.sleep_ms(50)
@@ -229,13 +241,8 @@ async def daily_task(reboot_relay=None):
 
             _logger("Syncing RTC...")
 
-            try:
-                ntptime.settime()
-                if CHECK_DST:
-                    _check_dst()
-                _logger("Synced!")
-            except OSError as e:
-                _logger("Failed to sync RTC: {}".format(e))
+            await sync_time(SYNC_ATTEMPTS)
+
             await uasyncio.sleep(3600)
         else:
             await uasyncio.sleep(30)
@@ -290,7 +297,7 @@ async def receive_command(socket, relay, port):
                 _logger("Command received!")
 
                 if ENABLE_BLINKING:
-                        uasyncio.create_task(_blinkLED(LED, 2))
+                        uasyncio.create_task(blink_LED(LED, 2))
 
                 gpio = command.get('gpio')
                 if gpio != 'on' and gpio != 'fs':
@@ -311,44 +318,49 @@ async def receive_command(socket, relay, port):
 
             conn.close()
 
-async def sync_time():
+async def sync_time(attempts=0):
+    # An attempts of 0 keeps retrying until the sync succeeds
     global time_is_set
 
+    attempt = 0
+
     while True:
+        attempt += 1
+
         try:
             ntptime.settime()
             if CHECK_DST:
                 _check_dst()
             time_is_set = True
             _logger("System time set!\n")
-            return
+            return True
         except OSError as e:
+            if attempts and attempt >= attempts:
+                _logger("Failed to sync time after {} attempts: {}\n".format(attempt, e))
+                return False
+
             _logger("Failed to sync time, retrying: {}".format(e))
-            await uasyncio.sleep(10)
+            await uasyncio.sleep(SYNC_RETRY_TIME)
 
 async def main():
     try:
         _logger("Beginning a new session")
         _logger("Board: {} {}".format(uos.uname().machine, '(wired)'))
 
-        await attempt_connection()
+        await _attempt_connection()
 
         if CHECK_TIME > 0:
-            uasyncio.create_task(check_connection())
+            uasyncio.create_task(_check_connection())
 
-        s1 = _get_socket(port=__RELAY_PORT1[1])
-        s2 = _get_socket(port=__RELAY_PORT2[1])
-        s3 = _get_socket(port=__RELAY_PORT3[1])
-        global sockets_opened
-        sockets_opened = True
+        for _, port in __RELAYS:
+            sockets.append(_get_socket(port=port))
 
         _logger("Waiting for a socket connection...\n")
 
-        uasyncio.create_task(receive_command(s1, *__RELAY_PORT1))
-        uasyncio.create_task(receive_command(s2, *__RELAY_PORT2))
-        uasyncio.create_task(receive_command(s3, *__RELAY_PORT3))
-        uasyncio.create_task(daily_task(__REBOOT_RELAY))
-        uasyncio.create_task(sync_time())
+        for sock, (relay, port) in zip(sockets, __RELAYS):
+            uasyncio.create_task(receive_command(sock, relay, port))
+        uasyncio.create_task(daily_task(__RELAYS[__REBOOT_RELAY_INDEX][0]))
+        uasyncio.create_task(sync_time(SYNC_ATTEMPTS))
 
         while True:
             await uasyncio.sleep(180)
@@ -358,10 +370,8 @@ async def main():
         _logger("Ending session and restarting...\n\n")
         if ENABLE_LOGGING:
             log_file.close()
-        if sockets_opened:
-            s1.close()
-            s2.close()
-            s3.close()
+        for sock in sockets:
+            sock.close()
         reset()
 
 if __name__ == "__main__":
