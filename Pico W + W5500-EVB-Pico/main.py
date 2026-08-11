@@ -329,7 +329,10 @@ async def receive_command(socket, relay, port):
                         uasyncio.create_task(blink_LED(LED, 2))
 
                 gpio = command.get('gpio')
-                if gpio != 'on' and gpio != 'fs':
+                if gpio == 'reboot_board':
+                    status = 'ack'
+                    _logger("Board reboot requested...")
+                elif gpio != 'on' and gpio != 'fs':
                     status = 'error'
                     _logger("Error reading command\n")
                 elif queue[0] >= 2:
@@ -344,6 +347,13 @@ async def receive_command(socket, relay, port):
                     conn.sendall(ujson.dumps({'status': status}) + '\n')
                 except OSError as e:
                     _logger("Failed to send acknowledgement: {}".format(e))
+
+                if gpio == 'reboot_board':
+                    conn.close()
+                    # Gives the acknowledgement time to leave before the socket dies with the board
+                    await uasyncio.sleep_ms(500)
+                    _logger("Restarting...\n")
+                    _reset()
 
             conn.close()
 

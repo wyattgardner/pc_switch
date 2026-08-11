@@ -40,9 +40,15 @@ boot.py turns on WebREPL so you can update main.py without pulling the board bac
 python webrepl_cli.py -p <boot.py password> main.py <LAN IP>:/main.py
 ```
 
-5. Power cycle the board to apply the update.
+5. Apply the update by restarting the board. Send it a `reboot_board` command on any of its relay ports, which it acknowledges before restarting:
 
-Run the command from that directory rather than passing a full path, since `C:\...` reads as a second remote target. Keep WebREPL on the LAN and don't forward port 8266, it's plaintext with a weak password scheme.
+```
+python -c "import socket,json; s=socket.socket(); s.connect(('<LAN IP>',7776)); s.sendall(json.dumps({'gpio':'reboot_board'}).encode()); print(s.recv(128))"
+```
+
+Run the push command from that directory rather than passing a full path, since `C:\...` reads as a second remote target. Keep WebREPL on the LAN and don't forward port 8266, it's plaintext with a weak password scheme.
+
+A pushed main.py sits on the board unused until that restart, so nothing changes until you send the command. If the new file raises on import the board loses the relay ports and `reboot_board` with them, leaving USB as the only way back, so keep the board reachable when pushing anything structural.
 
 # Raspberry Pi Pico W
 Uses WiFi, so nothing but power has to reach the board.
