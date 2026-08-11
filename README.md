@@ -17,27 +17,32 @@ Supported boards, each with its own folder in this repository:
 # Setup
 1. Flash MicroPython onto your board, see your board's section below for the firmware it needs.
 2. Open main.py in your board's folder and set the options at the top. On the Pico W that includes your network's SSID and password.
-3. Upload main.py to the root directory of the board (methods include the [Thonny editor](https://projects.raspberrypi.org/en/projects/getting-started-with-the-pico/9), the MicroPico extension in VS Code, or `mpremote fs cp main.py :main.py`).
+3. Upload main.py to the root directory of the board (methods include the [Thonny editor](https://projects.raspberrypi.org/en/projects/getting-started-with-the-pico/9), the MicroPico extension in VS Code, or `mpremote fs cp main.py :main.py`). Optionally upload boot.py from this repository's root alongside it, which turns on [WebREPL](#updating-over-the-network).
 4. Disconnect power button wires from power button pins on your PC's motherboard.
 5. Connect a jumper wire splitter to the pins and reconnect the power button wires to one end of the splitter.
 6. On the other end of the splitter, run two jumper wires to the NO and COM pins of the relay.
-7. Use jumper wires to connect the board's first relay GPIO to the relay's IN pin, a 3.3V pin to the relay's VCC pin, and a GND pin to the relay's GND pin. The GPIOs each board uses are listed in its section below.
+7. Use jumper wires to connect the board's relay GPIO to the relay's IN pin, a 3.3V pin to the relay's VCC pin, and a GND pin to the relay's GND pin. The GPIOs each board uses are listed in its section below.
 8. Power the board to start the program.
 9. Figure out the LAN address assigned to the board. You could look at your network gateway's UI or view the program's output over a MicroPython REPL connection (e.g. MicroPico).
 10. Enter the LAN address into the [accompanying Android app](https://github.com/wyattgardner/pc_switch_app).
     * To use your network's WAN address to send the packet, you must forward the port you're using (7776 by default) to the board.
 11. You can now use the app to turn on your PC.
 
-# Relays
-How many relays a board drives is set by the `__RELAY_ASSIGNMENTS` line near the top of main.py, which takes any number of (GPIO, port) pairs and opens one listening socket per relay:
+# Updating over the network
+boot.py turns on WebREPL so you can update main.py without pulling the board back to a USB port.
 
-```python
-__RELAY_ASSIGNMENTS = ((2, 7776), (3, 7775), (4, 7774))
+1. Set the password in boot.py (`admin` by default, 4 to 9 characters).
+2. Upload boot.py alongside main.py once, over USB. WebREPL now listens on port 8266 after boot.
+3. Download [webrepl_cli.py](https://github.com/micropython/webrepl).
+4. To push an update, run it from the directory holding your main.py, using your board's address:
+
+```
+python webrepl_cli.py -p <boot.py password> main.py <LAN IP>:/main.py
 ```
 
-The default is the three above, so one board can switch three PCs: GPIO2 answers on port 7776, GPIO3 on 7775, and GPIO4 on 7774. The GPIOs differ per board, see the board sections below for the ones each uses. The board lists what it set up on startup, so the REPL output is worth a look if you change this.
+5. Power cycle the board to apply the update.
 
-Add a pair to serve a fourth PC, or delete pairs down to a single one if you're only switching the one. Each relay needs its own port, and the app talks to one port at a time, so give every PC its own profile in the app. If you enable the daily forced reboot, `__REBOOT_RELAY_INDEX` picks which relay it acts on, counting from 0.
+Run the command from that directory rather than passing a full path, since `C:\...` reads as a second remote target. Keep WebREPL on the LAN and don't forward port 8266, it's plaintext with a weak password scheme.
 
 # Raspberry Pi Pico W
 Uses WiFi, so nothing but power has to reach the board.

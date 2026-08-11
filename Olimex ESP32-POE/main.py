@@ -35,6 +35,8 @@ TIME_ZONE = const(-5)
 CHECK_DST = const(True)
 # Max time in seconds before restarting attempt to connect to network
 NETWORK_TIMEOUT = const(10)
+# Attempts to reach the network before giving up and resetting the board, set to 0 to keep trying forever
+CONNECTION_ATTEMPTS = const(10)
 # Time in milliseconds that the relay is activated for power on command
 SHORT_RELAY_TIME = const(200)
 # Time in milliseconds that the relay is activated for force shutdown command
@@ -80,6 +82,13 @@ def _logger(*args):
         log_file.write(data + '\n')
         log_file.flush()
 
+def _reset():
+    # Nothing after a call to this runs, the board restarts here
+    if ENABLE_LOGGING:
+        log_file.close()
+
+    reset()
+
 def _relays(*assignments):
     # Each assignment is a (GPIO, port) pair, one listening socket is opened per relay
     relays = tuple((Pin(gpio, Pin.OUT, value=0), port) for gpio, port in assignments)
@@ -92,8 +101,11 @@ __RELAYS = _relays(*__RELAY_ASSIGNMENTS)
 
 async def _attempt_connection():
     attempting_connection = True
+    attempt = 0
 
     while attempting_connection:
+        attempt += 1
+
         _logger("Waiting for network connection...")
 
         network_timeout = NETWORK_TIMEOUT
@@ -109,6 +121,10 @@ async def _attempt_connection():
             _logger(f"MAC Address: {mac}")
             attempting_connection = False
         else:
+            if CONNECTION_ATTEMPTS and attempt >= CONNECTION_ATTEMPTS:
+                _logger("Failed to connect after {} attempts, restarting...\n".format(attempt))
+                _reset()
+
             _logger("Connection failed, reattempting...")
             await uasyncio.sleep(1)
 
@@ -336,8 +352,9 @@ async def sync_time(attempts=0):
             return True
         except OSError as e:
             if attempts and attempt >= attempts:
-                _logger("Failed to sync time after {} attempts: {}\n".format(attempt, e))
-                return False
+                _logger("Failed to sync time after {} attempts: {}".format(attempt, e))
+                _logger("Restarting...\n")
+                _reset()
 
             _logger("Failed to sync time, retrying: {}".format(e))
             await uasyncio.sleep(SYNC_RETRY_TIME)
