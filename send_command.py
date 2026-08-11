@@ -11,14 +11,14 @@ TIMEOUT = 5
 
 def send_command(host, command='reboot_board', port=DEFAULT_PORT, timeout=TIMEOUT):
     """
-    Sends a single JSON command to a board and returns its acknowledgement as a string.
+    Sends a single request to a board and returns its response as a string.
     """
     sock = socket.socket()
     sock.settimeout(timeout)
 
     try:
         sock.connect((host, port))
-        sock.sendall(json.dumps({'gpio': command}).encode())
+        sock.sendall(json.dumps({'request': command}).encode())
         return sock.recv(128).decode().strip()
     finally:
         sock.close()

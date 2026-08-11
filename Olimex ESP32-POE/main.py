@@ -230,13 +230,13 @@ async def force_shutdown(relay):
     await uasyncio.sleep_ms(LONG_RELAY_TIME)
     relay.value(0)
 
-async def _run_command(gpio, relay, lock, queue):
+async def _run_command(request, relay, lock, queue):
     if lock.locked():
         _logger("Busy, command queued...\n")
 
     try:
         async with lock:
-            if gpio == 'on':
+            if request == 'on':
                 await power_on(relay)
             else:
                 await force_shutdown(relay)
@@ -315,27 +315,27 @@ async def receive_command(socket, relay, port):
                 if ENABLE_BLINKING:
                         uasyncio.create_task(blink_LED(LED, 2))
 
-                gpio = command.get('gpio')
-                if gpio == 'reboot_board':
-                    status = 'ack'
+                request = command.get('request')
+                if request == 'reboot_board':
+                    response = 'ack'
                     _logger("Board reboot requested...")
-                elif gpio != 'on' and gpio != 'fs':
-                    status = 'error'
+                elif request != 'on' and request != 'fs':
+                    response = 'error'
                     _logger("Error reading command\n")
                 elif queue[0] >= 2:
-                    status = 'full'
+                    response = 'full'
                     _logger("Busy, command queue full...\n")
                 else:
-                    status = 'ack'
+                    response = 'ack'
                     queue[0] += 1
-                    uasyncio.create_task(_run_command(gpio, relay, lock, queue))
+                    uasyncio.create_task(_run_command(request, relay, lock, queue))
 
                 try:
-                    conn.sendall(ujson.dumps({'status': status}) + '\n')
+                    conn.sendall(ujson.dumps({'response': response}) + '\n')
                 except OSError as e:
                     _logger("Failed to send acknowledgement: {}".format(e))
 
-                if gpio == 'reboot_board':
+                if request == 'reboot_board':
                     conn.close()
                     # Gives the acknowledgement time to leave before the socket dies with the board
                     await uasyncio.sleep_ms(500)
