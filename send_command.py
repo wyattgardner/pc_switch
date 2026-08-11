@@ -27,7 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description="Send a command to a pc_switch board.")
     parser.add_argument('host', help="LAN address of the board")
     parser.add_argument('command', nargs='?', default='reboot_board',
-                        help="'reboot_board' to restart the board, 'on' to power on, 'fs' to force shutdown (default: reboot_board)")
+                        help="'reboot_board' to restart the board, 'turn_pc_on' to power on, 'force_shutdown_pc' to force shutdown (default: reboot_board)")
     parser.add_argument('-p', '--port', type=int, default=DEFAULT_PORT,
                         help="port the target relay listens on (default: {})".format(DEFAULT_PORT))
     args = parser.parse_args()

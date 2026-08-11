@@ -34,13 +34,13 @@ The board speaks a small JSON protocol over TCP. Open a connection to a relay's 
 A request names what you want the board to do:
 
 ```json
-{"request": "on"}
+{"request": "turn_pc_on"}
 ```
 
 | Request | Does |
 | --- | --- |
-| `on` | Taps the relay briefly to press the power button |
-| `fs` | Holds the relay down to force a shutdown |
+| `turn_pc_on` | Taps the relay briefly to press the power button |
+| `force_shutdown_pc` | Holds the relay down to force a shutdown |
 | `reboot_board` | Restarts the board itself, used to apply an updated main.py |
 
 The board answers with a response and, for `reboot_board`, restarts right after sending it:
@@ -55,9 +55,9 @@ The board answers with a response and, for `reboot_board`, restarts right after 
 | `error` | Request was missing or not one of the three above |
 | `full` | A command is already running with another queued, so this one was dropped |
 
-Each relay listens on its own port and handles one request at a time, queueing at most one behind the running command. send_command.py sends any of these, and the [Android app](https://github.com/wyattgardner/pc_switch_app) sends `on` and `fs`.
+Each relay listens on its own port and handles one request at a time, queueing at most one behind the running command. send_command.py sends any of these, and the [Android app](https://github.com/wyattgardner/pc_switch_app) sends `turn_pc_on` and `force_shutdown_pc`.
 
-The key names changed in app version 1.3.3, from `gpio` and `status` to `request` and `response`. A board and an app from either side of that change cannot talk to each other, so update both together.
+This protocol changed in app version 1.3.3. The keys were `gpio` and `status`, and the two PC requests were `on` and `fs`. A board and an app from either side of that change cannot talk to each other, so update both together.
 
 # Updating over the network
 boot.py turns on WebREPL so you can update main.py without pulling the board back to a USB port.

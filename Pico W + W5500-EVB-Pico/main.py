@@ -249,7 +249,7 @@ async def _run_command(request, relay, lock, queue):
 
     try:
         async with lock:
-            if request == 'on':
+            if request == 'turn_pc_on':
                 await power_on(relay)
             else:
                 await force_shutdown(relay)
@@ -332,7 +332,7 @@ async def receive_command(socket, relay, port):
                 if request == 'reboot_board':
                     response = 'ack'
                     _logger("Board reboot requested...")
-                elif request != 'on' and request != 'fs':
+                elif request != 'turn_pc_on' and request != 'force_shutdown_pc':
                     response = 'error'
                     _logger("Error reading command\n")
                 elif queue[0] >= 2:
