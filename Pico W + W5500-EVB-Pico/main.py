@@ -46,6 +46,8 @@ SHORT_RELAY_TIME = const(200)
 LONG_RELAY_TIME = const(7000)
 # Will check for network connection drop every CHECK_TIME seconds, set to 0 to disable
 CHECK_TIME = const(180)
+# Max time in seconds to wait for a connected client to send its request before dropping it
+RECEIVE_TIMEOUT = const(3)
 # Max time in seconds to wait for a response when syncing time
 NTP_TIMEOUT = const(5)
 # Attempts each RTC sync makes before giving up, and seconds between them
@@ -243,18 +245,25 @@ async def force_shutdown(relay):
     await uasyncio.sleep_ms(LONG_RELAY_TIME)
     relay.value(0)
 
-async def _run_command(request, relay, lock, queue):
-    if lock.locked():
-        _logger("Busy, command queued...\n")
-
+async def _run_command(request, relay, lock, queue, conn=None):
+    # A queued command keeps its connection open so the client can be told when its turn came and went
     try:
         async with lock:
             if request == 'turn_pc_on':
                 await power_on(relay)
             else:
                 await force_shutdown(relay)
+
+        if conn != None:
+            try:
+                conn.sendall(ujson.dumps({'response': 'done'}) + '\n')
+            except OSError as e:
+                _logger("Failed to send completion: {}".format(e))
     finally:
         queue[0] -= 1
+
+        if conn != None:
+            conn.close()
 
 async def daily_task(reboot_relay=None):
     while True:
@@ -284,6 +293,8 @@ async def receive_command(socket, relay, port):
 
     while True:
         conn, addr, data, command = None, None, None, None
+        # A queued command's connection outlives this loop pass, _run_command closes it
+        keep_open = False
 
         try:
             conn, addr = socket.accept()
@@ -296,12 +307,20 @@ async def receive_command(socket, relay, port):
         if conn != None:
             _logger("Connection on {} from {}".format(port, addr))
 
-            conn.settimeout(3)
+            # Kept non-blocking with an awaited deadline. A blocking recv here stalls the whole
+            # event loop, so one client that connects and sends nothing freezes every other relay
+            # and the background tasks for the full timeout.
+            conn.setblocking(False)
+            deadline = time.ticks_add(time.ticks_ms(), RECEIVE_TIMEOUT * 1000)
             # Receive a command from the client
             while True:
+                if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+                    _logger("Connection timed out, closing...\n")
+                    break
+
                 try:
                     data = conn.recv(1024)
-                    if data != None:
+                    if data:
                         try:
                             data = data.decode()
                             command = ujson.loads(data)
@@ -310,16 +329,21 @@ async def receive_command(socket, relay, port):
                             _logger("Invalid JSON received: {}".format(e))
                             break
                     else:
-                        await uasyncio.sleep_ms(100)
+                        # An empty result on a non-blocking socket means the client hung up
+                        _logger("Connection closed by client\n")
+                        break
 
                 except OSError as e:
-                    if e.args[0] == errno.ETIMEDOUT:
+                    if e.args[0] == errno.EAGAIN:
+                        await uasyncio.sleep_ms(50)
+                    elif e.args[0] == errno.ETIMEDOUT:
                         _logger("Connection timed out, closing...\n")
                         break
-                    if e.args[0] == errno.EAGAIN:
-                        await uasyncio.sleep_ms(100)
                     else:
                         raise
+
+            # Back to blocking just for the replies, which are a few dozen bytes and never wait
+            conn.settimeout(RECEIVE_TIMEOUT)
 
             # Excecute command to turn on PC
             if command != None:
@@ -338,6 +362,12 @@ async def receive_command(socket, relay, port):
                 elif queue[0] >= 2:
                     response = 'full'
                     _logger("Busy, command queue full...\n")
+                elif queue[0] >= 1:
+                    response = 'queued'
+                    keep_open = True
+                    queue[0] += 1
+                    _logger("Busy, command queued...\n")
+                    uasyncio.create_task(_run_command(request, relay, lock, queue, conn))
                 else:
                     response = 'ack'
                     queue[0] += 1
@@ -355,7 +385,8 @@ async def receive_command(socket, relay, port):
                     _logger("Restarting...\n")
                     _reset()
 
-            conn.close()
+            if not keep_open:
+                conn.close()
 
 async def sync_time(attempts=0):
     # An attempts of 0 keeps retrying until the sync succeeds

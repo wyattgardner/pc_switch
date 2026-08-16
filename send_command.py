@@ -8,10 +8,16 @@ import socket
 DEFAULT_PORT = 7776
 # Seconds to wait for the board to acknowledge
 TIMEOUT = 5
+# Seconds to wait for the board to report a queued command finished, which only happens once the
+# command ahead of it has released the relay
+QUEUED_TIMEOUT = 30
 
 def send_command(host, command='reboot_board', port=DEFAULT_PORT, timeout=TIMEOUT):
     """
     Sends a single request to a board and returns its response as a string.
+
+    A queued command gets a second response once it has run, so both are returned separated by
+    an arrow.
     """
     sock = socket.socket()
     sock.settimeout(timeout)
@@ -19,7 +25,20 @@ def send_command(host, command='reboot_board', port=DEFAULT_PORT, timeout=TIMEOU
     try:
         sock.connect((host, port))
         sock.sendall(json.dumps({'request': command}).encode())
-        return sock.recv(128).decode().strip()
+        response = sock.recv(128).decode().strip()
+
+        try:
+            queued = json.loads(response).get('response') == 'queued'
+        except ValueError:
+            # Anything unparseable is passed straight back to the caller to look at
+            queued = False
+
+        if not queued:
+            return response
+
+        print(f"{response} -> waiting for the running command to finish...")
+        sock.settimeout(QUEUED_TIMEOUT)
+        return response + ' -> ' + sock.recv(128).decode().strip()
     finally:
         sock.close()
 

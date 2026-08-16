@@ -51,11 +51,22 @@ The board answers with a response and, for `reboot_board`, restarts right after 
 
 | Response | Means |
 | --- | --- |
-| `ack` | Request accepted and being carried out |
+| `ack` | Request accepted and being carried out now |
+| `queued` | Request accepted but waiting behind the running command |
 | `error` | Request was missing or not one of the three above |
 | `full` | A command is already running with another queued, so this one was dropped |
 
-Each relay listens on its own port and handles one request at a time, queueing at most one behind the running command. send_command.py sends any of these, and the [Android app](https://github.com/wyattgardner/pc_switch_app) sends `turn_pc_on` and `force_shutdown_pc`.
+Each relay listens on its own port and handles one request at a time, queueing at most one behind the running command.
+
+A `queued` reply is the one case where the connection stays open. The board holds it until the queued command has run, then sends a second object and closes:
+
+```json
+{"response": "done"}
+```
+
+Reading that second object is optional, a client that closes after `queued` just misses it. Since it can arrive several seconds later (a force shutdown holds the relay for `LONG_RELAY_TIME`), give the second read a longer timeout than the first.
+
+send_command.py sends any of these, and the [Android app](https://github.com/wyattgardner/pc_switch_app) sends `turn_pc_on` and `force_shutdown_pc`.
 
 send_command.py usage:
 
