@@ -98,11 +98,11 @@ def _reset():
 
 def _relays(*assignments):
     # Each assignment is a (GPIO, port) pair, one listening socket is opened per relay
-    relays = tuple((Pin(gpio, Pin.OUT, value=0), port) for gpio, port in assignments)
+    # Runs at import, so it stays silent and main() reports the result in order
+    return tuple((Pin(gpio, Pin.OUT, value=0), port) for gpio, port in assignments)
 
-    _logger("Relays initialized: " + ', '.join("GPIO{} on port {}".format(gpio, port) for gpio, port in assignments))
-
-    return relays
+def _relay_summary():
+    return "Relays initialized: " + ', '.join("GPIO{} on port {}".format(gpio, port) for gpio, port in __RELAY_ASSIGNMENTS)
 
 __RELAYS = _relays(*__RELAY_ASSIGNMENTS)
 
@@ -246,19 +246,24 @@ async def force_shutdown(relay):
     relay.value(0)
 
 async def _run_command(request, relay, lock, queue, conn=None):
-    # A queued command keeps its connection open so the client can be told when its turn came and went
+    # A queued command keeps its connection open so the client can be told the moment its turn
+    # comes. That is sent here rather than after the relay work so it lands with the log line
+    # below it, matching an ack, which also arrives before the relay moves.
     try:
         async with lock:
+            if conn != None:
+                try:
+                    conn.sendall(ujson.dumps({'response': 'running'}) + '\n')
+                except OSError as e:
+                    _logger("Failed to send start notice: {}".format(e))
+
+                conn.close()
+                conn = None
+
             if request == 'turn_pc_on':
                 await power_on(relay)
             else:
                 await force_shutdown(relay)
-
-        if conn != None:
-            try:
-                conn.sendall(ujson.dumps({'response': 'done'}) + '\n')
-            except OSError as e:
-                _logger("Failed to send completion: {}".format(e))
     finally:
         queue[0] -= 1
 
@@ -417,6 +422,7 @@ async def main():
     try:
         _logger("Beginning a new session")
         _logger("Board: {} {}".format(uos.uname().machine, '(wireless)' if WIRELESS_MODE else '(wired)'))
+        _logger(_relay_summary() + "\n")
 
         await _attempt_connection()
 

@@ -8,7 +8,7 @@ import socket
 DEFAULT_PORT = 7776
 # Seconds to wait for the board to acknowledge
 TIMEOUT = 5
-# Seconds to wait for the board to report a queued command finished, which only happens once the
+# Seconds to wait for the board to report a queued command starting, which only happens once the
 # command ahead of it has released the relay
 QUEUED_TIMEOUT = 30
 
@@ -16,8 +16,8 @@ def send_command(host, command='reboot_board', port=DEFAULT_PORT, timeout=TIMEOU
     """
     Sends a single request to a board and returns its response as a string.
 
-    A queued command gets a second response once it has run, so both are returned separated by
-    an arrow.
+    A queued command gets a second response once it starts running, so both are returned
+    separated by an arrow.
     """
     sock = socket.socket()
     sock.settimeout(timeout)

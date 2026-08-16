@@ -29,7 +29,7 @@ Supported boards, each with its own folder in this repository:
 11. You can now use the app to turn on your PC.
 
 # Requests and responses
-The board speaks a small JSON protocol over TCP. Open a connection to a relay's port, send one request, read the response, and the board closes the connection. Both messages are a single JSON object.
+The board speaks a small JSON protocol over TCP. Open a connection to a relay's port, send one request, and read the response. Every message is a single JSON object.
 
 A request names what you want the board to do:
 
@@ -58,13 +58,15 @@ The board answers with a response and, for `reboot_board`, restarts right after 
 
 Each relay listens on its own port and handles one request at a time, queueing at most one behind the running command.
 
-A `queued` reply is the one case where the connection stays open. The board holds it until the queued command has run, then sends a second object and closes:
+A `queued` reply is the one case where the connection stays open. The board holds it until the command ahead has released the relay, then sends a second object as the queued command starts and closes:
 
 ```json
-{"response": "done"}
+{"response": "running"}
 ```
 
-Reading that second object is optional, a client that closes after `queued` just misses it. Since it can arrive several seconds later (a force shutdown holds the relay for `LONG_RELAY_TIME`), give the second read a longer timeout than the first.
+`running` marks the same moment for a queued command that `ack` marks for one that runs immediately: the board is about to move the relay, not finished with it. That keeps a client's timing consistent whichever reply it got.
+
+Reading that second object is optional, a client that closes after `queued` just misses it. Since it can arrive several seconds later (a force shutdown ahead of it holds the relay for `LONG_RELAY_TIME`), give the second read a longer timeout than the first.
 
 send_command.py sends any of these, and the [Android app](https://github.com/wyattgardner/pc_switch_app) sends `turn_pc_on` and `force_shutdown_pc`.
 
