@@ -11,6 +11,8 @@ import ubinascii
 import uos
 from micropython import const
 
+# ISO 8601 UTC firmware build identifier
+FIRMWARE = const('2026-08-16T08:42:18Z')
 # GPIO pins used for relays and their corresponding ports used for socket communication (default 7776)
 # Add or remove (GPIO, port) pairs to serve any number of relays
 __RELAY_ASSIGNMENTS = ((32, 7776), (33, 7775), (4, 7774))
@@ -407,7 +409,7 @@ async def sync_time(attempts=0):
 
 async def main():
     try:
-        _logger("Beginning a new session")
+        _logger("Beginning a new session on firmware v{}".format(FIRMWARE))
         _logger("Board: {} {}".format(uos.uname().machine, '(wired)'))
         _logger(_relay_summary() + "\n")
 

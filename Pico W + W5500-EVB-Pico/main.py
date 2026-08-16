@@ -11,6 +11,8 @@ import ubinascii
 import uos
 from micropython import const
 
+# ISO 8601 UTC firmware build identifier
+FIRMWARE = const('2026-08-16T08:42:18Z')
 # Toggles between wireless (WiFi) and wired (Ethernet) mode
 # Set to true for Pico W and false for W5500-EVB-Pico
 WIRELESS_MODE = const(True)
@@ -420,7 +422,7 @@ async def sync_time(attempts=0):
 
 async def main():
     try:
-        _logger("Beginning a new session")
+        _logger("Beginning a new session on firmware v{}".format(FIRMWARE))
         _logger("Board: {} {}".format(uos.uname().machine, '(wireless)' if WIRELESS_MODE else '(wired)'))
         _logger(_relay_summary() + "\n")
 
